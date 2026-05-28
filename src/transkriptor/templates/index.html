@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+{% block title %}Transkriptor{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Record Meeting</h2>
+    </header>
+    <div id="recorder-section">
+        <div class="grid">
+            <label>
+                Audio Source
+                <select id="rec-device">
+                    <option value="">Loading devices...</option>
+                </select>
+            </label>
+            <label>
+                Language
+                <select id="rec-language">
+                    <option value="auto" selected>Auto-detect</option>
+                    <option value="en">English</option>
+                    <option value="de">German / Deutsch</option>
+                </select>
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                <input type="checkbox" id="rec-diarization" checked>
+                Speaker Diarization
+            </label>
+            <label>
+                <input type="checkbox" id="rec-summarization" checked>
+                AI Summary
+            </label>
+        </div>
+        <div class="rec-controls">
+            <button id="rec-start-btn" class="rec-btn" onclick="startRecording()">
+                <span class="rec-icon"></span> Record
+            </button>
+            <button id="rec-stop-btn" class="rec-btn rec-btn-stop" onclick="stopRecording()" style="display:none">
+                <span class="stop-icon"></span> Stop &amp; Transcribe
+            </button>
+            <span id="rec-timer" class="rec-timer" style="display:none">00:00</span>
+        </div>
+        <div id="rec-error" class="error-message" style="display:none"></div>
+    </div>
+</article>
+
+<article>
+    <header>
+        <h2>Upload Audio File</h2>
+    </header>
+    <form id="upload-form" enctype="multipart/form-data">
+        <div class="grid">
+            <label>
+                Audio File
+                <input type="file" name="file" accept=".wav,.mp3,.m4a,.ogg,.flac,.wma,.aac,.webm,.mp4" required>
+            </label>
+            <label>
+                Language
+                <select name="language">
+                    <option value="auto" selected>Auto-detect</option>
+                    <option value="en">English</option>
+                    <option value="de">German / Deutsch</option>
+                </select>
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                <input type="checkbox" name="diarization_enabled" value="true" checked>
+                Speaker Diarization
+            </label>
+            <label>
+                <input type="checkbox" name="summarization_enabled" value="true" checked>
+                AI Summary
+            </label>
+        </div>
+        <details>
+            <summary>Advanced Options</summary>
+            <div class="grid">
+                <label>
+                    Min Speakers
+                    <input type="number" name="min_speakers" min="1" max="20" placeholder="Auto">
+                </label>
+                <label>
+                    Max Speakers
+                    <input type="number" name="max_speakers" min="1" max="20" placeholder="Auto">
+                </label>
+            </div>
+        </details>
+        <button type="submit" id="upload-btn">Start Transcription</button>
+    </form>
+    <div id="upload-error" class="error-message" style="display:none"></div>
+</article>
+
+<article>
+    <header>
+        <h2>Reprocess Existing File</h2>
+        <small>Files already on the server — no re-upload needed</small>
+    </header>
+    <div id="reprocess-section">
+        <div id="reprocess-list" style="margin-bottom:1rem"></div>
+        <div id="reprocess-form" style="display:none">
+            <input type="hidden" id="rp-source-job">
+            <p id="rp-filename" style="margin-bottom:0.5rem"></p>
+            <div class="grid">
+                <label>
+                    Language
+                    <select id="rp-language">
+                        <option value="auto" selected>Auto-detect</option>
+                        <option value="en">English</option>
+                        <option value="de">German / Deutsch</option>
+                    </select>
+                </label>
+                <label>
+                    <input type="checkbox" id="rp-diarization" checked>
+                    Speaker Diarization
+                </label>
+                <label>
+                    <input type="checkbox" id="rp-summarization" checked>
+                    AI Summary
+                </label>
+            </div>
+            <div style="margin-bottom:1rem">
+                <label>
+                    <input type="checkbox" id="rp-retranscribe">
+                    Re-transcribe
+                </label>
+                <small id="rp-cache-hint" style="display:block;margin-top:0.25rem;color:var(--muted-color,#888)">Unchecked: uses cached transcript, only re-summarizes (much faster)</small>
+            </div>
+            <button id="rp-btn" onclick="submitReprocess()">Reprocess</button>
+        </div>
+    </div>
+</article>
+
+<article>
+    <header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+            <h2 style="margin:0">Jobs</h2>
+            <button class="outline secondary" style="margin:0;padding:0.3rem 0.8rem;font-size:0.85rem" onclick="cleanupJobs(this)">Clean Up Failed</button>
+        </div>
+    </header>
+    <div id="job-list" hx-get="/partials/jobs" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading jobs...</p>
+    </div>
+</article>
+
+<script>
+// ── Recording ──────────────────────────────────────────────────────
+let recTimerInterval = null;
+let recStartTime = null;
+
+// Load audio devices on page load
+(async function loadDevices() {
+    try {
+        const resp = await fetch('/api/recording/devices');
+        const data = await resp.json();
+        const select = document.getElementById('rec-device');
+        select.innerHTML = '';
+        for (const dev of data.devices) {
+            const opt = document.createElement('option');
+            opt.value = dev.index;
+            opt.textContent = dev.name;
+            opt.dataset.name = dev.name;
+            // Pre-select Aggregate Device or BlackHole
+            if (dev.name.includes('Aggregate') || dev.name.includes('BlackHole')) {
+                opt.selected = true;
+            }
+            select.appendChild(opt);
+        }
+    } catch (e) {
+        console.error('Failed to load devices:', e);
+    }
+})();
+
+// Check if already recording (e.g. page refresh)
+(async function checkStatus() {
+    try {
+        const resp = await fetch('/api/recording/status');
+        const data = await resp.json();
+        if (data.recording) {
+            showRecording(data.started_at);
+        }
+    } catch (e) {}
+})();
+
+function showRecording(startedAt) {
+    document.getElementById('rec-start-btn').style.display = 'none';
+    document.getElementById('rec-stop-btn').style.display = '';
+    document.getElementById('rec-timer').style.display = '';
+    document.getElementById('rec-device').disabled = true;
+
+    recStartTime = startedAt ? new Date(startedAt) : new Date();
+    recTimerInterval = setInterval(updateTimer, 1000);
+    updateTimer();
+}
+
+function updateTimer() {
+    const elapsed = Math.floor((Date.now() - recStartTime.getTime()) / 1000);
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const ss = String(elapsed % 60).padStart(2, '0');
+    const hh = Math.floor(elapsed / 3600);
+    document.getElementById('rec-timer').textContent =
+        hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+async function startRecording() {
+    const select = document.getElementById('rec-device');
+    const idx = parseInt(select.value);
+    const name = select.options[select.selectedIndex].dataset.name || '';
+    const errDiv = document.getElementById('rec-error');
+    errDiv.style.display = 'none';
+
+    try {
+        const resp = await fetch(`/api/recording/start?device_index=${idx}&device_name=${encodeURIComponent(name)}`, { method: 'POST' });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Failed to start recording');
+        }
+        const data = await resp.json();
+        showRecording(data.started_at);
+    } catch (e) {
+        errDiv.textContent = e.message;
+        errDiv.style.display = 'block';
+    }
+}
+
+async function stopRecording() {
+    const btn = document.getElementById('rec-stop-btn');
+    const errDiv = document.getElementById('rec-error');
+    errDiv.style.display = 'none';
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+
+    clearInterval(recTimerInterval);
+
+    const lang = document.getElementById('rec-language').value;
+    const diar = document.getElementById('rec-diarization').checked;
+    const summ = document.getElementById('rec-summarization').checked;
+
+    try {
+        const params = new URLSearchParams({
+            language: lang,
+            diarization_enabled: diar.toString(),
+            summarization_enabled: summ.toString(),
+        });
+        const resp = await fetch(`/api/recording/stop?${params}`, { method: 'POST' });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Failed to stop recording');
+        }
+        const data = await resp.json();
+        window.location.href = data.job_url;
+    } catch (e) {
+        errDiv.textContent = e.message;
+        errDiv.style.display = 'block';
+        // Reset UI
+        document.getElementById('rec-start-btn').style.display = '';
+        document.getElementById('rec-stop-btn').style.display = 'none';
+        document.getElementById('rec-timer').style.display = 'none';
+        document.getElementById('rec-device').disabled = false;
+    } finally {
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+    }
+}
+
+// ── Reprocess existing files ──────────────────────────────────────
+(async function loadUploads() {
+    try {
+        const resp = await fetch('/api/jobs/uploads');
+        const data = await resp.json();
+        const list = document.getElementById('reprocess-list');
+        if (!data.uploads.length) {
+            list.innerHTML = '<small>No files on server yet.</small>';
+            return;
+        }
+        let html = '<table role="grid"><thead><tr><th>File</th><th>Size</th><th></th></tr></thead><tbody>';
+        for (const u of data.uploads) {
+            html += `<tr id="upload-row-${u.source_job_id}">
+                <td>${u.filename}</td>
+                <td>${u.file_size_mb} MB</td>
+                <td style="white-space:nowrap">
+                    <button class="outline" style="padding:0.2rem 0.6rem;font-size:0.85rem;margin:0" onclick="selectReprocess('${u.source_job_id}','${u.filename}',${u.file_size_mb},${u.has_transcript})">Reprocess</button>
+                    <button class="outline secondary" style="padding:0.2rem 0.6rem;font-size:0.85rem;margin:0" onclick="deleteUpload('${u.source_job_id}','${u.filename}',this)">Delete</button>
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        list.innerHTML = html;
+    } catch (e) {
+        console.error('Failed to load uploads:', e);
+    }
+})();
+
+async function deleteUpload(jobId, filename, btn) {
+    if (!confirm(`Delete "${filename}" and all its jobs?`)) return;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    try {
+        const resp = await fetch('/api/jobs/' + jobId, { method: 'DELETE' });
+        if (resp.ok) {
+            document.getElementById('upload-row-' + jobId)?.remove();
+            // Hide reprocess form if this file was selected
+            const hidden = document.getElementById('rp-source-job');
+            if (hidden && hidden.value === jobId) {
+                document.getElementById('reprocess-form').style.display = 'none';
+            }
+        }
+    } catch (e) {
+        console.error('Delete failed:', e);
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+    }
+}
+
+function selectReprocess(jobId, filename, sizeMb, hasTranscript) {
+    document.getElementById('rp-source-job').value = jobId;
+    document.getElementById('rp-filename').innerHTML = `<strong>${filename}</strong> (${sizeMb} MB)`;
+    document.getElementById('reprocess-form').style.display = 'block';
+
+    // Show/hide cache hint based on whether a transcript is available
+    const hint = document.getElementById('rp-cache-hint');
+    const retranscribeCheckbox = document.getElementById('rp-retranscribe');
+    if (hasTranscript) {
+        hint.textContent = 'Unchecked: uses cached transcript, only re-summarizes (much faster)';
+        retranscribeCheckbox.checked = false;
+        retranscribeCheckbox.disabled = false;
+    } else {
+        hint.textContent = 'No cached transcript available — full transcription will run';
+        retranscribeCheckbox.checked = true;
+        retranscribeCheckbox.disabled = true;
+    }
+}
+
+async function submitReprocess() {
+    const btn = document.getElementById('rp-btn');
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.textContent = 'Starting...';
+
+    const form = new FormData();
+    form.set('source_job_id', document.getElementById('rp-source-job').value);
+    form.set('language', document.getElementById('rp-language').value);
+    form.set('diarization_enabled', document.getElementById('rp-diarization').checked.toString());
+    form.set('summarization_enabled', document.getElementById('rp-summarization').checked.toString());
+    form.set('retranscribe', document.getElementById('rp-retranscribe').checked.toString());
+
+    try {
+        const resp = await fetch('/api/jobs/reprocess', { method: 'POST', body: form });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Reprocess failed');
+        }
+        const job = await resp.json();
+        window.location.href = '/jobs/' + job.id;
+    } catch (e) {
+        btn.textContent = 'Error: ' + e.message;
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+    }
+}
+
+async function cleanupJobs(btn) {
+    if (!confirm('Delete all failed jobs and their files?')) return;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    try {
+        const resp = await fetch('/api/jobs/cleanup', { method: 'DELETE' });
+        const data = await resp.json();
+        btn.textContent = `Deleted ${data.deleted_jobs} jobs (${data.freed_mb} MB)`;
+        setTimeout(() => {
+            btn.textContent = 'Clean Up Failed';
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+        }, 3000);
+    } catch (e) {
+        btn.textContent = 'Error';
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+    }
+}
+
+// ── Upload ─────────────────────────────────────────────────────────
+document.getElementById('upload-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = document.getElementById('upload-btn');
+    const errorDiv = document.getElementById('upload-error');
+    errorDiv.style.display = 'none';
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    btn.textContent = 'Uploading...';
+
+    const data = new FormData(form);
+    if (!data.get('diarization_enabled')) data.set('diarization_enabled', 'false');
+    if (!data.get('summarization_enabled')) data.set('summarization_enabled', 'false');
+
+    try {
+        const resp = await fetch('/api/jobs', { method: 'POST', body: data });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Upload failed');
+        }
+        const job = await resp.json();
+        window.location.href = '/jobs/' + job.id;
+    } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.style.display = 'block';
+    } finally {
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+        btn.textContent = 'Start Transcription';
+    }
+});
+</script>
+
+{% endblock %}

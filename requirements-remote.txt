@@ -1,0 +1,26 @@
+# Slim dependency set for remote-backend deployment (no torch/pyannote/whisper)
+# Used in Dockerfile for K8s — all heavy ML work is offloaded to DGX Spark
+
+fastapi>=0.121.0,<1.0
+uvicorn[standard]>=0.38.0
+python-multipart>=0.0.18
+aiofiles>=24.1.0
+jinja2>=3.1.6
+sse-starlette>=2.3.0
+aiosqlite>=0.21.0
+pydub>=0.25.1
+soundfile>=0.13.1
+pydantic-settings>=2.9.0
+httpx>=0.28.0
+ollama>=0.6.0
+
+# OpenAI SDK (for vLLM OpenAI-compatible API — auto-instrumented by traceloop)
+openai>=1.0.0
+
+# OpenTelemetry + OpenLLMetry (Instana GenAI observability)
+opentelemetry-api>=1.39.0
+opentelemetry-sdk>=1.39.0
+opentelemetry-exporter-otlp-proto-http>=1.39.0
+opentelemetry-instrumentation-fastapi>=0.60b1
+opentelemetry-instrumentation-httpx>=0.60b1
+traceloop-sdk>=0.34.0

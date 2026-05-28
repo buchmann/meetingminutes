@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "transkriptor",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "transkriptor"],
+      "port": 8000
+    }
+  ]
+}

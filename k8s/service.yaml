@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: transkriptor
+  namespace: transkriptor
+  labels:
+    app: transkriptor
+spec:
+  type: ClusterIP
+  selector:
+    app: transkriptor
+  ports:
+    - port: 80
+      targetPort: 8000
+      protocol: TCP
+      name: http

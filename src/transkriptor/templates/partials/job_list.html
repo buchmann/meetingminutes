@@ -1,0 +1,45 @@
+{% if jobs %}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>File</th>
+            <th>Duration</th>
+            <th>Status</th>
+            <th>Language</th>
+            <th>Speakers</th>
+            <th>Created</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for job in jobs %}
+        <tr>
+            <td><a href="/jobs/{{ job.id }}">{{ job.filename }}</a></td>
+            <td>
+                {% if job.duration_secs %}
+                {{ (job.duration_secs // 60)|int }}:{{ "%02d"|format((job.duration_secs % 60)|int) }}
+                {% else %}&mdash;{% endif %}
+            </td>
+            <td>
+                <span class="status-badge status-{{ job.status }}">
+                    {% if job.status not in ('completed', 'failed') %}
+                    <span aria-busy="true"></span>
+                    {% endif %}
+                    {{ job.status }}
+                </span>
+            </td>
+            <td>{{ job.detected_language or '...' }}</td>
+            <td>{{ job.speaker_count or '...' }}</td>
+            <td>{{ job.created_at[:16] | replace('T', ' ') }}</td>
+            <td>
+                <button class="outline secondary small delete-btn" data-job-id="{{ job.id }}">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No transcription jobs yet. Upload an audio file to get started.</p>
+{% endif %}

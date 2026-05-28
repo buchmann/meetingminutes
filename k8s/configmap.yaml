@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transkriptor-config
+  namespace: transkriptor
+data:
+  # Transcription: remote via DGX Spark whisperx-blackwell
+  TRANSKRIPTOR_TRANSCRIPTION_BACKEND: "remote"
+  TRANSKRIPTOR_WHISPERX_URL: "http://192.168.178.190:8003"
+
+  # GPU manager: auto-swaps whisperx ↔ vLLM on Spark (shared GPU memory)
+  TRANSKRIPTOR_GPU_MANAGER_URL: "http://192.168.178.190:9090"
+
+  # Summarization: remote via DGX Spark vLLM
+  TRANSKRIPTOR_SUMMARY_BACKEND: "openai"
+  TRANSKRIPTOR_OPENAI_BASE_URL: "http://192.168.178.190:8000/v1"
+  TRANSKRIPTOR_OPENAI_API_KEY: "none"
+  TRANSKRIPTOR_OPENAI_MODEL: "openai/gpt-oss-120b"
+
+  # Ollama fallback (not used when summary_backend=openai)
+  TRANSKRIPTOR_OLLAMA_BASE_URL: "http://localhost:11434"
+  TRANSKRIPTOR_OLLAMA_MODEL: "llama3.3:latest"
+
+  # Language & diarization
+  TRANSKRIPTOR_LANGUAGE: "auto"
+  TRANSKRIPTOR_DIARIZATION_ENABLED: "true"
+  TRANSKRIPTOR_SUMMARIZATION_ENABLED: "true"
+
+  # OpenTelemetry → Instana agent OTLP endpoint directly (no collector)
+  TRANSKRIPTOR_OTEL_ENABLED: "true"
+  TRANSKRIPTOR_OTEL_ENDPOINT: "http://192.168.178.190:4328"
+  TRANSKRIPTOR_OTEL_SERVICE_NAME: "transkriptor"
+
+  # Instana GenAI observability via OpenLLMetry (traceloop-sdk)
+  OTEL_RESOURCE_ATTRIBUTES: "INSTANA_PLUGIN=genai"
+  TRACELOOP_LOGGING_ENABLED: "true"
+  TRACELOOP_METRICS_ENABLED: "true"
+
+  # Server
+  TRANSKRIPTOR_HOST: "0.0.0.0"
+  TRANSKRIPTOR_PORT: "8000"
+  TRANSKRIPTOR_DATA_DIR: "/app/data"
+  TRANSKRIPTOR_MAX_UPLOAD_SIZE_MB: "2048"

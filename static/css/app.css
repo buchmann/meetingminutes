@@ -1,0 +1,297 @@
+.error-message {
+    color: var(--pico-del-color);
+    padding: 0.5rem;
+}
+
+.error-box {
+    background: var(--pico-del-color);
+    color: var(--pico-background-color);
+    padding: 1rem;
+    border-radius: var(--pico-border-radius);
+    margin: 1rem 0;
+}
+
+/* Status badges */
+.status-badge {
+    padding: 0.2rem 0.6rem;
+    border-radius: 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.status-completed { background: #2d6a4f; color: #fff; }
+.status-failed { background: #d32f2f; color: #fff; }
+.status-pending { background: #666; color: #fff; }
+.status-preprocessing,
+.status-transcribing,
+.status-diarizing,
+.status-merging,
+.status-summarizing { background: #1565c0; color: #fff; }
+
+/* Transcript */
+.transcript-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.export-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.export-buttons a {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.8rem;
+}
+
+.transcript-view {
+    max-height: 600px;
+    overflow-y: auto;
+    font-family: var(--pico-font-family-monospace);
+    font-size: 0.85rem;
+    line-height: 1.8;
+}
+
+.transcript-segment {
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+.transcript-segment .ts {
+    color: var(--pico-muted-color);
+    margin-right: 0.5rem;
+    font-size: 0.75rem;
+}
+
+.transcript-segment .speaker {
+    font-weight: 700;
+    margin-right: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.3rem;
+    font-size: 0.75rem;
+}
+
+/* Speaker colors */
+.speaker-00 { background: #1976d2; color: #fff; }
+.speaker-01 { background: #388e3c; color: #fff; }
+.speaker-02 { background: #f57c00; color: #fff; }
+.speaker-03 { background: #7b1fa2; color: #fff; }
+.speaker-04 { background: #c62828; color: #fff; }
+.speaker-05 { background: #00838f; color: #fff; }
+
+/* Topic tags */
+.topic-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+}
+
+.tag {
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
+    padding: 0.2rem 0.6rem;
+    border-radius: 1rem;
+    font-size: 0.8rem;
+}
+
+/* Timeline */
+.timeline {
+    border-left: 3px solid var(--pico-primary);
+    padding-left: 1rem;
+    margin: 0.5rem 0 1rem;
+}
+
+.timeline-entry {
+    padding: 0.3rem 0;
+    font-size: 0.9rem;
+    position: relative;
+}
+
+.timeline-entry::before {
+    content: "";
+    position: absolute;
+    left: -1.35rem;
+    top: 0.6rem;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--pico-primary);
+}
+
+/* Topic details */
+details {
+    margin-bottom: 0.5rem;
+    padding: 0.5rem;
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-card-background-color);
+}
+
+details summary .ts {
+    margin-left: 0.5rem;
+    color: var(--pico-muted-color);
+}
+
+/* Status pills for topics */
+.status-pill {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 1rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}
+.status-pill.status-completed { background: #2d6a4f; color: #fff; }
+.status-pill.status-in_progress { background: #1565c0; color: #fff; }
+.status-pill.status-pending { background: #666; color: #fff; }
+
+/* Sub-points within topics */
+.sub-points {
+    margin: 0.5rem 0 0.5rem 1rem;
+    padding: 0;
+}
+.sub-points li {
+    margin-bottom: 0.4rem;
+    font-size: 0.9rem;
+}
+.sub-detail {
+    color: var(--pico-muted-color);
+    font-size: 0.85rem;
+}
+
+/* Remaining items */
+.remaining-items {
+    margin: 0.5rem 0;
+    padding: 0.4rem 0.6rem;
+    background: rgba(255, 165, 0, 0.1);
+    border-left: 3px solid #f57c00;
+    border-radius: 0 var(--pico-border-radius) var(--pico-border-radius) 0;
+}
+.remaining-items ul {
+    margin: 0.2rem 0 0 1rem;
+    padding: 0;
+}
+.remaining-items li {
+    margin-bottom: 0.1rem;
+}
+
+.topic-speakers {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--pico-muted-color);
+}
+
+/* Next steps */
+.next-steps li {
+    margin-bottom: 0.5rem;
+}
+
+/* Open questions */
+.open-questions li {
+    margin-bottom: 0.5rem;
+    color: var(--pico-muted-color);
+    font-style: italic;
+}
+
+.action-items li {
+    margin-bottom: 0.5rem;
+}
+
+/* Small button variant */
+.small {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+}
+
+/* Style profile */
+.style-active blockquote {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    border-left: 3px solid var(--pico-primary);
+    padding: 0.5rem 1rem;
+    margin: 0.5rem 0;
+    background: var(--pico-card-background-color);
+    border-radius: 0 var(--pico-border-radius) var(--pico-border-radius) 0;
+}
+
+.style-inactive {
+    padding: 1rem;
+    text-align: center;
+    color: var(--pico-muted-color);
+}
+
+.style-sample {
+    font-size: 0.85rem;
+}
+
+/* Recording controls */
+.rec-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+.rec-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: var(--pico-border-radius);
+    cursor: pointer;
+}
+
+.rec-icon {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #d32f2f;
+}
+
+.rec-btn-stop {
+    background: #d32f2f;
+    border-color: #d32f2f;
+}
+
+.rec-btn-stop:hover {
+    background: #b71c1c;
+    border-color: #b71c1c;
+}
+
+.stop-icon {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-radius: 2px;
+}
+
+.rec-timer {
+    font-family: var(--pico-font-family-monospace);
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #d32f2f;
+    animation: pulse-red 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+#progress-section {
+    text-align: center;
+    padding: 1rem 0;
+}
+
+#progress-pct {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--pico-muted-color);
+}

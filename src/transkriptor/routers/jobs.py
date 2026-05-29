@@ -524,6 +524,80 @@ async def delete_style_profile(request: Request):
     return {"ok": True}
 
 
+@router.get("/gpu/metrics")
+async def gpu_metrics(request: Request):
+    """Fetch GPU metrics from DCGM exporter + gpu-manager on DGX Spark."""
+    import httpx
+
+    settings = request.app.state.settings
+    # Derive DGX Spark host from gpu_manager_url or openai_base_url
+    spark_host = "192.168.178.190"
+    if settings.gpu_manager_url:
+        from urllib.parse import urlparse
+        spark_host = urlparse(settings.gpu_manager_url).hostname or spark_host
+
+    result = {
+        "gpu_util": None,
+        "mem_util": None,
+        "temperature": None,
+        "power_watts": None,
+        "sm_clock_mhz": None,
+        "memory_available_gb": None,
+        "active_vllm_profile": None,
+        "whisperx_running": None,
+        "vllm_running": None,
+        "coexistence": None,
+        "error": None,
+    }
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        # 1) DCGM exporter metrics (Prometheus format)
+        try:
+            resp = await client.get(f"http://{spark_host}:9400/metrics")
+            resp.raise_for_status()
+            for line in resp.text.splitlines():
+                if line.startswith("#") or "{" not in line:
+                    continue
+                # Parse "METRIC_NAME{labels} value"
+                name = line.split("{")[0]
+                value_str = line.rsplit("}", 1)[-1].strip()
+                try:
+                    value = float(value_str)
+                except ValueError:
+                    continue
+                if name == "DCGM_FI_DEV_GPU_UTIL":
+                    result["gpu_util"] = value
+                elif name == "DCGM_FI_DEV_MEM_COPY_UTIL":
+                    result["mem_util"] = value
+                elif name == "DCGM_FI_DEV_GPU_TEMP":
+                    result["temperature"] = value
+                elif name == "DCGM_FI_DEV_POWER_USAGE":
+                    result["power_watts"] = round(value, 1)
+                elif name == "DCGM_FI_DEV_SM_CLOCK":
+                    result["sm_clock_mhz"] = value
+        except Exception as exc:
+            result["error"] = f"DCGM: {exc}"
+
+        # 2) GPU manager status
+        if settings.gpu_manager_url:
+            try:
+                resp = await client.get(f"{settings.gpu_manager_url.rstrip('/')}/status")
+                resp.raise_for_status()
+                status = resp.json()
+                result["memory_available_gb"] = status.get("memory_available_gb")
+                result["active_vllm_profile"] = status.get("active_vllm_profile")
+                result["whisperx_running"] = status.get("whisperx")
+                result["vllm_running"] = status.get("vllm")
+                result["coexistence"] = status.get("coexistence")
+            except Exception as exc:
+                if result["error"]:
+                    result["error"] += f"; GPU manager: {exc}"
+                else:
+                    result["error"] = f"GPU manager: {exc}"
+
+    return result
+
+
 @router.get("/livez")
 async def liveness():
     """Lightweight liveness probe — no external calls."""

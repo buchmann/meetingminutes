@@ -20,17 +20,33 @@ async def _activate_gpu_service(gpu_manager_url: str, service: str) -> None:
     """Call the GPU manager to swap GPU services (whisperx ↔ vLLM).
 
     The DGX Spark can only run one GPU-heavy service at a time.
+    *service* can be "whisperx", "vllm", "vllm-small", or "vllm/{profile}".
     """
     if not gpu_manager_url:
         return
     url = f"{gpu_manager_url.rstrip('/')}/gpu/{service}"
     logger.info("GPU swap: activating %s via %s", service, url)
-    # vLLM 120B can take up to 600s to load; allow 900s total
+    # vLLM models can take up to 600s to load; allow 900s total
     async with httpx.AsyncClient(timeout=900.0) as client:
         resp = await client.post(url)
         resp.raise_for_status()
         result = resp.json()
         logger.info("GPU swap result: %s", result)
+
+
+def _resolve_vllm_profile(settings) -> str:
+    """Determine the GPU manager endpoint for vLLM based on config."""
+    profile = getattr(settings, "vllm_profile", "auto")
+    if profile == "large":
+        return "vllm"
+    if profile == "small":
+        return "vllm-small"
+    # auto-detect from model name or port
+    model = getattr(settings, "openai_model", "")
+    base_url = getattr(settings, "openai_base_url", "")
+    if "granite" in model.lower() or ":8001" in base_url:
+        return "vllm-small"
+    return "vllm"
 
 
 class Pipeline:
@@ -236,7 +252,7 @@ class Pipeline:
                             await self.db.update_job(
                                 job_id, status_message="Preparing GPU for summarization...",
                             )
-                            await _activate_gpu_service(self.settings.gpu_manager_url, "vllm")
+                            await _activate_gpu_service(self.settings.gpu_manager_url, _resolve_vllm_profile(self.settings))
                         with tracer.start_as_current_span(
                             "pipeline.summarize",
                             attributes={
@@ -325,7 +341,7 @@ class Pipeline:
                 # GPU swap: activate vLLM
                 if self.settings.gpu_manager_url and self.settings.summary_backend == "openai":
                     await self.db.update_job(job_id, status_message="Preparing GPU for summarization...")
-                    await _activate_gpu_service(self.settings.gpu_manager_url, "vllm")
+                    await _activate_gpu_service(self.settings.gpu_manager_url, _resolve_vllm_profile(self.settings))
 
                 await self.db.update_job(
                     job_id, status="summarizing", progress_pct=90,

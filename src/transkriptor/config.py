@@ -57,15 +57,17 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.1:70b"
 
     # OpenAI-compatible API settings (e.g. DGX Spark, vLLM, etc.)
-    openai_base_url: str = "http://192.168.178.190:8000/v1"
+    openai_base_url: str = "http://192.168.178.190:8001/v1"
     openai_api_key: str = "none"
-    openai_model: str = "gpt-oss-120b"
+    openai_model: str = "ibm/granite-3-3-8b-instruct"
 
     summarization_enabled: bool = True
     summary_language: str = "auto"
 
     # GPU manager (DGX Spark: swaps whisperx ↔ vLLM since both can't run simultaneously)
     gpu_manager_url: str = ""  # e.g. "http://192.168.178.190:9090"
+    # vLLM profile for GPU manager: "large" (120B), "small" (granite 8B), or "auto" (detect from model/port)
+    vllm_profile: str = "auto"
 
     # OpenTelemetry tracing
     otel_enabled: bool = False

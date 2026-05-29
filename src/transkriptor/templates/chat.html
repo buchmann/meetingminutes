@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Text Improver — Transkriptor{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Text Improver</h2>
+        <small>Paste an email, Slack message, or any text — get a corrected version in your writing style.</small>
+    </header>
+
+    <div class="chat-input-area">
+        <textarea id="chat-input" placeholder="Paste your text here..." rows="8"></textarea>
+        <div class="chat-controls">
+            <span id="chat-char-count" class="chat-char-count">0 / 6000 chars</span>
+            <div>
+                {% if has_style_profile %}
+                <span class="tag" title="Your writing style profile is active">Style active</span>
+                {% else %}
+                <span class="chat-hint">No style profile — <a href="/settings">add one in Settings</a></span>
+                {% endif %}
+                <button id="chat-improve-btn" onclick="improveText()">Improve</button>
+            </div>
+        </div>
+    </div>
+</article>
+
+<div id="chat-result" style="display:none">
+    <article>
+        <header>
+            <div class="chat-result-header">
+                <h3>Improved Text</h3>
+                <div class="chat-result-actions">
+                    <span id="chat-lang-badge" class="tag"></span>
+                    <button class="outline small" onclick="copyResult()">Copy</button>
+                </div>
+            </div>
+        </header>
+        <div id="chat-improved" class="chat-improved-text"></div>
+        <div id="chat-error" class="error-message" style="display:none"></div>
+    </article>
+
+    <details>
+        <summary>Original text</summary>
+        <div id="chat-original" class="chat-original-text"></div>
+    </details>
+</div>
+
+<div id="chat-history-section" style="display:none">
+    <article>
+        <header>
+            <div class="chat-result-header">
+                <h3>History</h3>
+                <button class="outline small secondary" onclick="clearHistory()">Clear</button>
+            </div>
+        </header>
+        <div id="chat-history"></div>
+    </article>
+</div>
+
+<script>
+const MAX_CHARS = 6000;
+const input = document.getElementById('chat-input');
+const charCount = document.getElementById('chat-char-count');
+let history = [];
+
+input.addEventListener('input', () => {
+    const len = input.value.length;
+    charCount.textContent = `${len} / ${MAX_CHARS} chars`;
+    charCount.style.color = len > MAX_CHARS ? '#d32f2f' : '';
+});
+
+async function improveText() {
+    const text = input.value.trim();
+    if (!text) return;
+
+    const btn = document.getElementById('chat-improve-btn');
+    const resultDiv = document.getElementById('chat-result');
+    const errorDiv = document.getElementById('chat-error');
+
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    btn.textContent = 'Improving...';
+    errorDiv.style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/chat/improve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok || (data.error && !data.improved)) {
+            errorDiv.textContent = data.error || 'Request failed';
+            errorDiv.style.display = 'block';
+            resultDiv.style.display = 'block';
+            document.getElementById('chat-improved').textContent = '';
+            return;
+        }
+
+        // Show result
+        document.getElementById('chat-improved').textContent = data.improved;
+        document.getElementById('chat-original').textContent = data.original;
+        document.getElementById('chat-lang-badge').textContent = data.language === 'de' ? 'Deutsch' : 'English';
+        resultDiv.style.display = 'block';
+
+        if (data.error) {
+            // Partial error (e.g. truncation warning)
+            errorDiv.textContent = data.error;
+            errorDiv.style.display = 'block';
+        }
+
+        // Add to history
+        history.unshift({
+            original: data.original.substring(0, 80) + (data.original.length > 80 ? '...' : ''),
+            improved: data.improved.substring(0, 80) + (data.improved.length > 80 ? '...' : ''),
+            full_improved: data.improved,
+            language: data.language,
+            time: new Date().toLocaleTimeString(),
+        });
+        renderHistory();
+
+    } catch (e) {
+        errorDiv.textContent = 'Connection error: ' + e.message;
+        errorDiv.style.display = 'block';
+        resultDiv.style.display = 'block';
+    } finally {
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+        btn.textContent = 'Improve';
+    }
+}
+
+function copyResult() {
+    const text = document.getElementById('chat-improved').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    });
+}
+
+function renderHistory() {
+    const section = document.getElementById('chat-history-section');
+    const container = document.getElementById('chat-history');
+    if (!history.length) {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = 'block';
+    container.innerHTML = history.map((h, i) => `
+        <div class="chat-history-item" onclick="loadFromHistory(${i})">
+            <div class="chat-history-meta">
+                <span class="tag">${h.language === 'de' ? 'DE' : 'EN'}</span>
+                <small>${h.time}</small>
+            </div>
+            <div class="chat-history-preview">${escapeHtml(h.improved)}</div>
+        </div>
+    `).join('');
+}
+
+function loadFromHistory(idx) {
+    const h = history[idx];
+    if (h) {
+        document.getElementById('chat-improved').textContent = h.full_improved;
+        document.getElementById('chat-result').style.display = 'block';
+        document.getElementById('chat-error').style.display = 'none';
+    }
+}
+
+function clearHistory() {
+    history = [];
+    renderHistory();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Allow Ctrl+Enter / Cmd+Enter to submit
+input.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        improveText();
+    }
+});
+</script>
+
+{% endblock %}

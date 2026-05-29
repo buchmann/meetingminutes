@@ -295,3 +295,162 @@ details summary .ts {
     margin-top: 0.3rem;
     color: var(--pico-muted-color);
 }
+
+/* ── GPU Status Widget ─────────────────────────────────────────────── */
+.gpu-status-card {
+    padding-bottom: 0.5rem;
+}
+
+.gpu-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.gpu-metric {
+    display: grid;
+    grid-template-columns: 60px 1fr 60px;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.gpu-metric-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--pico-muted-color);
+    text-transform: uppercase;
+}
+
+.gpu-bar-track {
+    height: 10px;
+    background: var(--pico-muted-border-color);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.gpu-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.5s ease;
+}
+
+.gpu-metric-value {
+    font-size: 0.85rem;
+    font-family: var(--pico-font-family-monospace);
+    text-align: right;
+}
+
+.gpu-services {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+    flex-wrap: wrap;
+}
+
+.gpu-mem-free {
+    font-size: 0.8rem;
+    font-family: var(--pico-font-family-monospace);
+    color: var(--pico-muted-color);
+}
+
+.gpu-coex {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.3rem;
+    background: #2d6a4f;
+    color: #fff;
+}
+
+/* ── Text Improver / Chat ──────────────────────────────────────────── */
+.chat-input-area textarea {
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    resize: vertical;
+    min-height: 150px;
+}
+
+.chat-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+.chat-controls > div {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.chat-char-count {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color);
+    font-family: var(--pico-font-family-monospace);
+}
+
+.chat-hint {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color);
+}
+
+.chat-result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chat-result-header h3 {
+    margin: 0;
+}
+
+.chat-result-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.chat-improved-text {
+    font-size: 0.95rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    padding: 0.5rem 0;
+}
+
+.chat-original-text {
+    font-size: 0.85rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--pico-muted-color);
+    padding: 0.5rem 0;
+}
+
+.chat-history-item {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.chat-history-item:hover {
+    background: var(--pico-card-background-color);
+}
+
+.chat-history-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.chat-history-preview {
+    font-size: 0.85rem;
+    color: var(--pico-muted-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

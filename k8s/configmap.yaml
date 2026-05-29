@@ -10,12 +10,15 @@ data:
 
   # GPU manager: auto-swaps whisperx ↔ vLLM on Spark (shared GPU memory)
   TRANSKRIPTOR_GPU_MANAGER_URL: "http://192.168.178.190:9090"
+  TRANSKRIPTOR_VLLM_PROFILE: "auto"
 
   # Summarization: remote via DGX Spark vLLM
+  # Options:  large → port 8000, model "openai/gpt-oss-120b"
+  #           small → port 8001, model "ibm/granite-3-3-8b-instruct"
   TRANSKRIPTOR_SUMMARY_BACKEND: "openai"
-  TRANSKRIPTOR_OPENAI_BASE_URL: "http://192.168.178.190:8000/v1"
+  TRANSKRIPTOR_OPENAI_BASE_URL: "http://192.168.178.190:8001/v1"
   TRANSKRIPTOR_OPENAI_API_KEY: "none"
-  TRANSKRIPTOR_OPENAI_MODEL: "openai/gpt-oss-120b"
+  TRANSKRIPTOR_OPENAI_MODEL: "ibm/granite-3-3-8b-instruct"
 
   # Ollama fallback (not used when summary_backend=openai)
   TRANSKRIPTOR_OLLAMA_BASE_URL: "http://localhost:11434"

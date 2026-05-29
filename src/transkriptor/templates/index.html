@@ -2,6 +2,18 @@
 {% block title %}Transkriptor{% endblock %}
 {% block content %}
 
+<article class="gpu-status-card">
+    <header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+            <h2 style="margin:0">DGX Spark GPU</h2>
+            <small id="gpu-refresh" style="cursor:pointer;color:var(--pico-muted-color)" onclick="refreshGpu()">Refresh</small>
+        </div>
+    </header>
+    <div id="gpu-widget" class="gpu-grid">
+        <p aria-busy="true">Loading GPU metrics...</p>
+    </div>
+</article>
+
 <article>
     <header>
         <h2>Record Meeting</h2>
@@ -380,6 +392,56 @@ async function cleanupJobs(btn) {
         btn.removeAttribute('aria-busy');
     }
 }
+
+// ── GPU metrics ──────────────────────────────────────────────────
+async function refreshGpu() {
+    const widget = document.getElementById('gpu-widget');
+    try {
+        const resp = await fetch('/api/gpu/metrics');
+        const d = await resp.json();
+
+        if (d.error && d.gpu_util === null) {
+            widget.innerHTML = `<p class="error-message">${d.error}</p>`;
+            return;
+        }
+
+        const bar = (label, value, max, unit, color) => {
+            if (value === null || value === undefined) return '';
+            const pct = Math.min((value / max) * 100, 100);
+            return `<div class="gpu-metric">
+                <div class="gpu-metric-label">${label}</div>
+                <div class="gpu-bar-track">
+                    <div class="gpu-bar-fill" style="width:${pct}%;background:${pct > 80 ? '#d32f2f' : color}"></div>
+                </div>
+                <div class="gpu-metric-value">${typeof value === 'number' ? Math.round(value) : value}${unit}</div>
+            </div>`;
+        };
+
+        let services = '';
+        if (d.whisperx_running !== null) {
+            const items = [];
+            if (d.whisperx_running) items.push('<span class="tag" style="background:#2d6a4f;color:#fff">WhisperX</span>');
+            if (d.vllm_running) items.push(`<span class="tag" style="background:#1565c0;color:#fff">vLLM ${d.active_vllm_profile || ''}</span>`);
+            if (d.memory_available_gb !== null) items.push(`<span class="gpu-mem-free">${d.memory_available_gb.toFixed(1)} GB free</span>`);
+            if (d.coexistence) items.push('<span class="gpu-coex">co-run</span>');
+            services = `<div class="gpu-services">${items.join(' ')}</div>`;
+        }
+
+        widget.innerHTML = `
+            ${bar('GPU', d.gpu_util, 100, '%', '#1565c0')}
+            ${bar('Mem', d.mem_util, 100, '%', '#388e3c')}
+            ${bar('Temp', d.temperature, 100, 'C', '#f57c00')}
+            ${bar('Power', d.power_watts, 200, 'W', '#7b1fa2')}
+            ${services}
+        `;
+    } catch (e) {
+        widget.innerHTML = `<p class="error-message">Could not reach GPU metrics</p>`;
+    }
+}
+
+// Auto-refresh GPU metrics every 15s
+refreshGpu();
+setInterval(refreshGpu, 15000);
 
 // ── Upload ─────────────────────────────────────────────────────────
 document.getElementById('upload-form').addEventListener('submit', async (e) => {

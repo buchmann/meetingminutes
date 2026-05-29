@@ -70,9 +70,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    from transkriptor.routers import jobs, pages, exports
+    from transkriptor.routers import chat, jobs, pages, exports
     app.include_router(pages.router)
     app.include_router(jobs.router)
     app.include_router(exports.router)
+    app.include_router(chat.router)
 
     return app

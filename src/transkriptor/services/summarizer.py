@@ -1,11 +1,13 @@
 import json
 import logging
 import re
+import time
 
 import ollama as ollama_client
 from opentelemetry import trace
 
 from transkriptor.models import ActionItem, SubPoint, SummaryResult, TopicDetail, TranscriptResult
+from transkriptor.tracing import get_llm_metrics
 
 try:
     from openai import AsyncOpenAI
@@ -154,6 +156,70 @@ TRANSCRIPT:
 {{transcript}}"""
 
 
+def _build_prompt_en_compact(tier: dict, duration_mins: int) -> str:
+    """Compact prompt for small-context models (Granite 8k). Simpler JSON, shorter instructions."""
+    return f"""Write meeting minutes as JSON for this ~{duration_mins} min meeting.
+
+Return ONLY this JSON structure (no markdown, no explanation):
+
+{{
+  "overall_summary": "4-6 sentence paragraph: who met, what was discussed, key outcomes and decisions. Use names and specific terms.",
+  "key_topics": [
+    {{
+      "name": "Topic Title",
+      "summary": "3-5 sentences: what was discussed, why it matters, what was decided or remains open. Use names."
+    }}
+  ],
+  "action_items": [
+    {{"description": "What needs to happen and why.", "assignee": "Person name", "deadline": "timeframe or null"}}
+  ],
+  "key_decisions": ["What was decided, with context."],
+  "timeline": ["00:00-03:12: Brief description of this segment"],
+  "participants": ["Name (Role/Affiliation)"],
+  "next_steps": ["Action with owner and timeframe"],
+  "open_questions": ["Unresolved question"]
+}}
+
+Aim for {tier['topics']} topics and {tier['timeline']} timeline entries.
+Fill ALL fields with substantive content. Use names from the transcript, not just speaker labels.
+ONLY valid JSON. No code fences.
+
+TRANSCRIPT:
+{{transcript}}"""
+
+
+def _build_prompt_de_compact(tier: dict, duration_mins: int) -> str:
+    """Compact German prompt for small-context models."""
+    return f"""Erstelle ein Besprechungsprotokoll als JSON fuer dieses ~{duration_mins} Min. Meeting.
+
+Gib NUR diese JSON-Struktur zurueck (kein Markdown, keine Erklaerung):
+
+{{
+  "overall_summary": "4-6 Saetze: Wer hat sich getroffen, was wurde besprochen, wichtigste Ergebnisse und Entscheidungen. Verwende Namen und konkrete Begriffe.",
+  "key_topics": [
+    {{
+      "name": "Thema",
+      "summary": "3-5 Saetze: Was wurde besprochen, warum wichtig, was wurde entschieden oder ist offen. Verwende Namen."
+    }}
+  ],
+  "action_items": [
+    {{"description": "Was muss geschehen und warum.", "assignee": "Name", "deadline": "Zeitrahmen oder null"}}
+  ],
+  "key_decisions": ["Was wurde entschieden, mit Kontext."],
+  "timeline": ["00:00-03:12: Kurze Beschreibung dieses Abschnitts"],
+  "participants": ["Name (Rolle/Organisation)"],
+  "next_steps": ["Massnahme mit Verantwortlichem und Zeitrahmen"],
+  "open_questions": ["Offene Frage"]
+}}
+
+Ziel: {tier['topics']} Themen und {tier['timeline']} Zeitachsen-Eintraege.
+Fuellen Sie ALLE Felder mit inhaltlichen Angaben. Verwende Namen aus dem Transkript.
+NUR gueltiges JSON. Keine Code-Bloecke.
+
+TRANSKRIPT:
+{{transcript}}"""
+
+
 def _build_prompt_de(tier: dict, duration_mins: int) -> str:
     return f"""Du bist ein Senior Executive Assistant und schreibst professionelle Meeting-Protokolle.
 
@@ -232,11 +298,68 @@ async def _call_openai_compatible(
     )
 
 
+# --------------- Model profiles ---------------
+# Each profile defines the model's context window and how to budget it.
+# Tokens are estimated at ~4 chars/token for English text.
+_MODEL_PROFILES: dict[str, dict] = {
+    "granite": {
+        "context_window": 8192,
+        "max_output_tokens": 2048,     # compact prompt needs less output
+        "prompt_reserve_tokens": 800,  # compact prompt is shorter
+        "chars_per_token": 4,
+    },
+    "gpt-oss-120b": {
+        "context_window": 32768,
+        "max_output_tokens": 16000,
+        "prompt_reserve_tokens": 1500,
+        "chars_per_token": 4,
+    },
+    "default": {
+        "context_window": 16384,
+        "max_output_tokens": 8000,
+        "prompt_reserve_tokens": 1500,
+        "chars_per_token": 4,
+    },
+}
+
+
+def _get_model_profile(model: str, base_url: str) -> dict:
+    """Match a model name / URL to its profile."""
+    model_lower = model.lower()
+    if "granite" in model_lower or ":8001" in base_url:
+        return _MODEL_PROFILES["granite"]
+    if "120b" in model_lower or "gpt-oss" in model_lower:
+        return _MODEL_PROFILES["gpt-oss-120b"]
+    return _MODEL_PROFILES["default"]
+
+
+def _max_tokens_for_model(model: str, base_url: str) -> int:
+    """Return a safe max_tokens limit based on the model's context window."""
+    return _get_model_profile(model, base_url)["max_output_tokens"]
+
+
+def _max_transcript_chars(model: str, base_url: str, prompt_template: str) -> int:
+    """Calculate how many chars of transcript we can fit given the model profile."""
+    profile = _get_model_profile(model, base_url)
+    cpt = profile["chars_per_token"]
+    # Budget: context_window = prompt_tokens + transcript_tokens + output_tokens
+    prompt_tokens = len(prompt_template) // cpt + profile["prompt_reserve_tokens"]
+    available_for_transcript = profile["context_window"] - prompt_tokens - profile["max_output_tokens"]
+    max_chars = max(available_for_transcript * cpt, 2000)  # floor at 2000 chars
+    logger.info(
+        "Model profile: context=%d, output=%d, prompt_est=%d → transcript budget=%d tokens (%d chars)",
+        profile["context_window"], profile["max_output_tokens"],
+        prompt_tokens, available_for_transcript, max_chars,
+    )
+    return max_chars
+
+
 async def _call_via_openai_sdk(
     prompt: str, base_url: str, api_key: str, model: str,
     max_retries: int = 3,
 ) -> str:
     """Call via openai SDK with manual gen_ai.* span attributes for Instana."""
+    max_tokens = _max_tokens_for_model(model, base_url)
     client = AsyncOpenAI(
         base_url=base_url.rstrip("/"),
         api_key=api_key if api_key and api_key != "none" else "not-needed",
@@ -248,47 +371,78 @@ async def _call_via_openai_sdk(
             f"chat {model}",
             kind=trace.SpanKind.CLIENT,
             attributes={
+                # gen_ai.* (OpenTelemetry GenAI semantic conventions)
                 "gen_ai.system": "openai",
                 "gen_ai.request.model": model,
-                "gen_ai.request.max_tokens": 32000,
+                "gen_ai.request.max_tokens": max_tokens,
                 "gen_ai.request.temperature": 0.1,
                 "gen_ai.request.top_p": 0.9,
+                # llm.* (Instana convention aliases)
+                "llm.request.type": "chat",
+                "llm.request.model": model,
             },
         ) as span:
+            t0 = time.monotonic()
             response = await client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 top_p=0.9,
-                max_tokens=32000,
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"},
                 extra_body={
                     "repetition_penalty": 1.1,
                     "chat_template_kwargs": {"enable_thinking": False},
                 },
             )
+            duration_ms = (time.monotonic() - t0) * 1000.0
             content = response.choices[0].message.content or ""
             finish = response.choices[0].finish_reason
             usage = response.usage
 
-            # Set gen_ai.* attributes Instana GenAI dashboard expects
+            # gen_ai.* attributes (OTEL standard)
             span.set_attribute("gen_ai.response.model", model)
             if finish:
                 span.set_attribute("gen_ai.response.finish_reasons", [finish])
+
+            prompt_tokens = 0
+            completion_tokens = 0
+            total = 0
             if usage:
-                span.set_attribute("gen_ai.usage.prompt_tokens", usage.prompt_tokens or 0)
-                span.set_attribute("gen_ai.usage.completion_tokens", usage.completion_tokens or 0)
-                total = (usage.prompt_tokens or 0) + (usage.completion_tokens or 0)
+                prompt_tokens = usage.prompt_tokens or 0
+                completion_tokens = usage.completion_tokens or 0
+                total = prompt_tokens + completion_tokens
+                span.set_attribute("gen_ai.usage.prompt_tokens", prompt_tokens)
+                span.set_attribute("gen_ai.usage.completion_tokens", completion_tokens)
                 span.set_attribute("gen_ai.usage.total_tokens", total)
+                # llm.* attributes (Instana aliases)
+                span.set_attribute("llm.usage.input_tokens", prompt_tokens)
+                span.set_attribute("llm.usage.output_tokens", completion_tokens)
+                span.set_attribute("llm.usage.total_tokens", total)
             span.set_attribute("gen_ai.content.prompt", prompt[:4096])
             span.set_attribute("gen_ai.content.completion", content[:4096])
 
+            # ── Record OTEL metrics (Instana GenAI dashboard) ─────
+            llm_metrics = get_llm_metrics()
+            if llm_metrics:
+                llm_metrics.record(
+                    input_tokens=prompt_tokens,
+                    output_tokens=completion_tokens,
+                    total_tokens=total,
+                    duration_ms=duration_ms,
+                    service_name="transkriptor",
+                    model_id=model,
+                    ai_system="openai",
+                )
+
             logger.info(
-                "OpenAI response: finish_reason=%s, prompt_tokens=%s, completion_tokens=%s, content_len=%d",
+                "OpenAI response: finish_reason=%s, prompt_tokens=%s, completion_tokens=%s, "
+                "content_len=%d, duration=%.1fs",
                 finish,
                 usage.prompt_tokens if usage else "?",
                 usage.completion_tokens if usage else "?",
                 len(content),
+                duration_ms / 1000.0,
             )
             if finish == "length":
                 logger.warning("Response was TRUNCATED (hit max_tokens). Summary may be incomplete!")
@@ -386,16 +540,26 @@ async def summarize(
     tier_name = "short" if duration_secs < 300 else ("medium" if duration_secs < 1800 else "long")
     logger.info("Duration %.0fs (%d min) → tier=%s", duration_secs, duration_mins, tier_name)
 
+    # Pick prompt: compact for small-context models, full for large models
+    effective_model = openai_model or model
+    effective_base_url = openai_base_url or ""
+    profile = _get_model_profile(effective_model, effective_base_url)
+    use_compact = profile["context_window"] <= 8192
+
     if summary_lang == "de":
-        prompt_template = _build_prompt_de(tier, duration_mins)
+        prompt_template = _build_prompt_de_compact(tier, duration_mins) if use_compact else _build_prompt_de(tier, duration_mins)
     else:
-        prompt_template = _build_prompt_en(tier, duration_mins)
+        prompt_template = _build_prompt_en_compact(tier, duration_mins) if use_compact else _build_prompt_en(tier, duration_mins)
+
+    if use_compact:
+        logger.info("Using compact prompt for small-context model (%d tokens)", profile["context_window"])
 
     formatted = _format_transcript_for_prompt(transcript)
 
-    # OpenAI backend on Spark has 32768 token context — can handle full transcripts
-    max_chars = 60000
+    # Truncate transcript to fit the model's context window (auto-calculated)
+    max_chars = _max_transcript_chars(effective_model, effective_base_url, prompt_template)
     if len(formatted) > max_chars:
+        logger.info("Transcript %d chars → truncated to %d chars", len(formatted), max_chars)
         formatted = formatted[:max_chars] + "\n[... transcript truncated ...]"
 
     prompt = prompt_template.replace("{transcript}", formatted)

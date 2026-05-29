@@ -1,12 +1,12 @@
 # Model Integration
 
-How Transkriptor works with WhisperX, Granite, and the GPU Manager on DGX Spark.
+How Transkriptor works with WhisperX, Granite, the 120B model, and the GPU Manager on DGX Spark.
 
 ## Hardware
 
 **NVIDIA DGX Spark** — 128GB unified memory (CPU + GPU shared), Blackwell B200 architecture.
 
-Unified memory means WhisperX (~5GB) and vLLM Granite (~61GB) can coexist simultaneously, with ~40GB free. The GPU Manager monitors this and enables co-running when memory allows.
+Unified memory means WhisperX (~5GB) and vLLM Granite (~61GB) can coexist simultaneously, with ~40GB free. The GPU Manager monitors this and enables co-running when memory allows. The larger 120B model (~90GB) needs the full GPU and cannot coexist with other services.
 
 ## Models
 
@@ -74,29 +74,100 @@ Key parameters:
 - **`enable_thinking: false`** disables Granite's chain-of-thought `<think>` blocks
 - **`repetition_penalty: 1.1`** prevents repetitive output from MoE models
 
-## Context Window Management
+### GPT-OSS 120B (Alternative Large Model)
 
-Granite's 8192-token context window requires careful budgeting:
+| Property | Value |
+|----------|-------|
+| Service | `vllm/vllm-openai:latest` |
+| Port | 8000 |
+| Model | `openai/gpt-oss-120b` |
+| Architecture | Dense transformer |
+| Context Window | 32,768 tokens |
+| GPU Memory | ~90GB |
+| vLLM Flag | `--max-model-len 32768` |
+
+The 120B model is a much larger, higher-quality alternative to Granite. It produces more detailed and nuanced summaries due to its 32k context window and larger parameter count.
+
+**Trade-offs vs Granite:**
+
+| | Granite 8B | GPT-OSS 120B |
+|--|-----------|-------------|
+| Context window | 8,192 tokens | 32,768 tokens |
+| GPU memory | ~61GB | ~90GB |
+| Coexistence with WhisperX | Yes (~40GB free) | No (needs full GPU) |
+| Load time | ~375s | ~500s+ |
+| Summary quality | Good (compact prompt) | Excellent (full prompt with sub-topics) |
+| Transcript budget | ~20,000 chars (~11 min) | ~100,000 chars (~55 min) |
+| GPU swap needed | No (coexists) | Yes (WhisperX must stop) |
+
+**When to use 120B:**
+- Long meetings (>30 minutes) that exceed Granite's context budget
+- When you need detailed sub-topics, speaker attribution per topic, and status tracking
+- When summary quality is more important than processing speed
+
+**Switching to 120B:** Change two values in the configmap (or `.env`):
+
+```yaml
+TRANSKRIPTOR_OPENAI_BASE_URL: "http://192.168.178.190:8000/v1"
+TRANSKRIPTOR_OPENAI_MODEL: "openai/gpt-oss-120b"
+```
+
+The pipeline and summarizer auto-detect the model and adjust:
+- GPU Manager profile switches from `vllm-small` to `vllm` (large)
+- Context budget expands from 8k to 32k tokens
+- Full prompt is used instead of compact prompt
+- `max_tokens` increases from 2,048 to 16,000
+
+No code changes needed — just config.
+
+## Choosing a Model
 
 ```
-Total: 8192 tokens
+Short meeting (<15 min), fast turnaround needed?
+  → Granite 8B (coexists with WhisperX, no GPU swap delay)
+
+Long meeting (>30 min) or need highest quality?
+  → GPT-OSS 120B (full context, detailed summaries, but slower GPU swap)
+```
+
+The `VLLM_PROFILE: "auto"` setting handles this automatically based on which model is configured.
+
+## Context Window Management
+
+Each model has a different context window, so the summarizer dynamically budgets tokens:
+
+**Granite 8B (8k context):**
+```
+Total: 8,192 tokens
 ├── Prompt template:   ~800 tokens (compact prompt)
-├── Transcript:        ~5344 tokens (~21,376 chars)
-└── Output:            ~2048 tokens (summary JSON)
+├── Transcript:        ~5,344 tokens (~21,376 chars ≈ 11 min)
+└── Output:            ~2,048 tokens (summary JSON)
+```
+
+**GPT-OSS 120B (32k context):**
+```
+Total: 32,768 tokens
+├── Prompt template:   ~1,500 tokens (full prompt with rich schema)
+├── Transcript:        ~15,268 tokens (~61,072 chars ≈ 34 min)
+└── Output:            ~16,000 tokens (detailed summary JSON)
 ```
 
 ### How the budget is calculated
 
 ```python
-profile = {"context_window": 8192, "max_output_tokens": 2048, "prompt_reserve_tokens": 800}
-chars_per_token = 4  # English text average
+# Model profiles define the budget constraints
+_MODEL_PROFILES = {
+    "granite":      {"context_window": 8192,  "max_output_tokens": 2048,  "prompt_reserve_tokens": 800},
+    "gpt-oss-120b": {"context_window": 32768, "max_output_tokens": 16000, "prompt_reserve_tokens": 1500},
+}
 
-prompt_tokens = len(template) // 4 + 800  # template + safety margin
-available = 8192 - prompt_tokens - 2048    # what's left for transcript
-max_chars = available * 4                   # convert to characters
+# Budget calculation
+prompt_tokens = len(template) // chars_per_token + prompt_reserve_tokens
+available = context_window - prompt_tokens - max_output_tokens
+max_chars = available * chars_per_token   # floor at 2000 chars
 ```
 
-For a typical meeting transcript, this allows ~20,000 characters (~11 minutes of conversation). Longer transcripts are truncated.
+Longer transcripts are truncated to fit. With the 120B model you can process meetings roughly 3x longer before truncation kicks in.
 
 ### Prompt selection
 

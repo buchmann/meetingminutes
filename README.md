@@ -25,7 +25,8 @@ Transkriptor Pod (FastAPI, SQLite, SSE progress)
     |
     +---> DGX Spark GPU Server (192.168.178.190)
     |       |--- WhisperX         (port 8003)  — transcription + diarization
-    |       |--- vLLM Granite 8B  (port 8001)  — summarization + text improvement
+    |       |--- vLLM Granite 8B  (port 8001)  — summarization (default, 8k context)
+    |       |--- vLLM GPT-OSS 120B (port 8000) — summarization (alt, 32k context)
     |       |--- GPU Manager      (port 9090)  — orchestrates GPU memory allocation
     |       |--- DCGM Exporter    (port 9400)  — GPU metrics
     |       |--- OTEL Collector   (port 4317)  — telemetry relay to Instana
@@ -56,7 +57,7 @@ Audio Upload / Recording
    + Diarize            (transcription + diarization in one call)
     |
     v
-4. GPU Swap           — GPU Manager activates vLLM Granite        [80%]
+4. GPU Swap           — GPU Manager activates vLLM (Granite or 120B) [80%]
     |
     v
 5. Summarize          — Granite 3.3 8B generates structured JSON  [80-98%]
@@ -117,10 +118,13 @@ The GPU server needs these containers running:
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
 | WhisperX | `mekopa/whisperx-blackwell:otel` | 8003 | Transcription + diarization |
-| vLLM Granite | `vllm/vllm-openai:latest` | 8001 | LLM summarization |
+| vLLM Granite 8B | `vllm/vllm-openai:latest` | 8001 | LLM summarization (default, 8k ctx) |
+| vLLM GPT-OSS 120B | `vllm/vllm-openai:latest` | 8000 | LLM summarization (large, 32k ctx) |
 | GPU Manager | `python:3.12-slim` | 9090 | GPU memory orchestration |
 | DCGM Exporter | `nvcr.io/nvidia/k8s/dcgm-exporter` | 9400 | GPU metrics |
 | OTEL Collector | `otel-collector-contrib` | 4317/4318 | Telemetry relay |
+
+> **Note:** Only one vLLM model runs at a time. Granite (61GB) can coexist with WhisperX; the 120B model (90GB) needs the full GPU. The GPU Manager handles switching automatically.
 
 ## Configuration
 
@@ -132,7 +136,7 @@ All settings use the `TRANSKRIPTOR_` prefix and can be set via environment varia
 | `WHISPERX_URL` | `http://192.168.178.190:8003` | Remote WhisperX endpoint |
 | `SUMMARY_BACKEND` | `ollama` | `ollama` or `openai` (vLLM) |
 | `OPENAI_BASE_URL` | `http://192.168.178.190:8001/v1` | vLLM endpoint |
-| `OPENAI_MODEL` | `ibm/granite-3-3-8b-instruct` | LLM model name |
+| `OPENAI_MODEL` | `ibm/granite-3-3-8b-instruct` | LLM model (`ibm/granite-3-3-8b-instruct` or `openai/gpt-oss-120b`) |
 | `GPU_MANAGER_URL` | (empty) | GPU Manager endpoint |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint |
@@ -172,7 +176,7 @@ See `src/transkriptor/config.py` for the complete list.
 | Frontend | HTMX, PicoCSS, Jinja2 templates |
 | Database | SQLite via aiosqlite |
 | Transcription | WhisperX (large-v3) on NVIDIA Blackwell GPU |
-| LLM | IBM Granite 3.3 8B via vLLM (OpenAI-compatible API) |
+| LLM | IBM Granite 3.3 8B (8k ctx) or GPT-OSS 120B (32k ctx) via vLLM |
 | Observability | OpenTelemetry, Instana, DCGM Exporter |
 | Deployment | Docker, Kubernetes, nginx ingress |
 | GPU Server | NVIDIA DGX Spark (128GB unified memory) |

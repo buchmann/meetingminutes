@@ -118,19 +118,23 @@ process_job(job_id)
 
 Generates structured meeting minutes from transcripts. This is the most complex service.
 
-**Model Profile System**: Different LLMs have different context windows. The summarizer dynamically budgets tokens:
+**Model Profile System**: Two LLM options with different context windows. The summarizer auto-detects which model is configured and budgets tokens accordingly:
+
+| Model | Context | Output Budget | Transcript Budget | Best For |
+|-------|---------|---------------|-------------------|----------|
+| Granite 8B (port 8001) | 8,192 | 2,048 | ~21k chars (~11 min) | Short/medium meetings, fast turnaround |
+| GPT-OSS 120B (port 8000) | 32,768 | 16,000 | ~61k chars (~34 min) | Long meetings, detailed summaries |
 
 ```python
 _MODEL_PROFILES = {
     "granite":     {"context_window": 8192,  "max_output_tokens": 2048, "prompt_reserve_tokens": 800},
     "gpt-oss-120b": {"context_window": 32768, "max_output_tokens": 16000, "prompt_reserve_tokens": 1500},
-    "default":     {"context_window": 16384, "max_output_tokens": 8000, "prompt_reserve_tokens": 1500},
 }
 ```
 
 **Budget calculation**: `available_for_transcript = context_window - prompt_tokens - max_output_tokens`
 
-For Granite (8k context): ~5400 tokens for prompt+transcript, ~2048 for output. Transcripts exceeding the budget are truncated.
+Transcripts exceeding the budget are truncated. Switching between models requires only a config change (`OPENAI_BASE_URL` and `OPENAI_MODEL`) — the summarizer and GPU Manager auto-detect everything else.
 
 **Prompt selection**: 
 - Full prompt (32k+ models): rich JSON schema with `sub_points`, `status`, `remaining`, `speakers_involved`

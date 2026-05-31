@@ -8,6 +8,7 @@
             <th>Status</th>
             <th>Language</th>
             <th>Speakers</th>
+            {% if shared_view %}<th>Shared by</th>{% endif %}
             <th>Created</th>
             <th></th>
         </tr>
@@ -31,9 +32,17 @@
             </td>
             <td>{{ job.detected_language or '...' }}</td>
             <td>{{ job.speaker_count or '...' }}</td>
+            {% if shared_view %}<td><small>{{ job.owner_username or '&mdash;' }}</small></td>{% endif %}
             <td>{{ job.created_at[:16] | replace('T', ' ') }}</td>
-            <td>
-                <button class="outline secondary small delete-btn" data-job-id="{{ job.id }}">Delete</button>
+            <td style="white-space:nowrap">
+                {% if not shared_view %}
+                    {% if job.visibility == 'shared' %}
+                    <button class="outline small share-btn" data-job-id="{{ job.id }}" data-shared="1">Unshare</button>
+                    {% else %}
+                    <button class="outline secondary small share-btn" data-job-id="{{ job.id }}" data-shared="0">Share</button>
+                    {% endif %}
+                    <button class="outline secondary small delete-btn" data-job-id="{{ job.id }}">Delete</button>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}
@@ -41,5 +50,11 @@
 </table>
 </figure>
 {% else %}
-<p>No transcription jobs yet. Upload an audio file to get started.</p>
+<p>
+    {% if shared_view %}
+    Nothing has been shared yet.
+    {% else %}
+    No transcription jobs yet. Upload an audio file to get started.
+    {% endif %}
+</p>
 {% endif %}

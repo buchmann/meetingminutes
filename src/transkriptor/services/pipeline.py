@@ -269,8 +269,7 @@ class Pipeline:
                                 status_message="Generating AI summary...",
                             )
                             from transkriptor.services.summarizer import summarize
-                            from transkriptor.services.style_analyzer import load_style_profile
-                            style = load_style_profile(self.settings.style_profile_path)
+                            style = await self.db.get_user_style_profile(job.get("user_id"))
                             summary_result = await summarize(
                                 transcript=transcript_result,
                                 ollama_base_url=self.settings.ollama_base_url,
@@ -348,8 +347,7 @@ class Pipeline:
                     status_message="Generating AI summary...",
                 )
                 from transkriptor.services.summarizer import summarize
-                from transkriptor.services.style_analyzer import load_style_profile
-                style = load_style_profile(self.settings.style_profile_path)
+                style = await self.db.get_user_style_profile(job.get("user_id"))
                 summary_result = await summarize(
                     transcript=transcript_result,
                     ollama_base_url=self.settings.ollama_base_url,

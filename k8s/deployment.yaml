@@ -25,6 +25,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: transkriptor-config
+            - secretRef:
+                name: transkriptor-secrets
           volumeMounts:
             - name: data
               mountPath: /app/data

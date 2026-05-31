@@ -6,14 +6,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
+from transkriptor.auth import require_user
 from transkriptor.models import JobResponse
 
 router = APIRouter(prefix="/api")
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".wma", ".aac", ".webm", ".mp4"}
+
+
+async def _get_owned_job(db, job_id: str, user: dict) -> dict:
+    """Fetch a job the user owns, else 404."""
+    job = await db.get_job(job_id)
+    if job is None or job["user_id"] != user["id"]:
+        raise HTTPException(404, "Job not found")
+    return job
+
+
+async def _get_visible_job(db, job_id: str, user: dict) -> dict:
+    """Fetch a job the user owns or that is shared, else 404."""
+    job = await db.get_job(job_id)
+    if job is None or (job["user_id"] != user["id"] and job["visibility"] != "shared"):
+        raise HTTPException(404, "Job not found")
+    return job
 
 
 @router.post("/jobs", response_model=JobResponse, status_code=201)
@@ -25,6 +42,7 @@ async def create_job(
     summarization_enabled: str = Form(default="true"),
     min_speakers: str = Form(default=""),
     max_speakers: str = Form(default=""),
+    user: dict = Depends(require_user),
 ):
     settings = request.app.state.settings
     db = request.app.state.db
@@ -57,6 +75,7 @@ async def create_job(
 
     job = await db.create_job(
         job_id=job_id,
+        user_id=user["id"],
         filename=file.filename or "unknown",
         file_path=str(file_path),
         file_size_bytes=size,
@@ -75,19 +94,20 @@ async def create_job(
 
 
 @router.get("/jobs", response_model=list[JobResponse])
-async def list_jobs(request: Request, limit: int = 50, offset: int = 0):
+async def list_jobs(
+    request: Request, limit: int = 50, offset: int = 0, user: dict = Depends(require_user)
+):
     db = request.app.state.db
-    jobs = await db.list_jobs(limit=limit, offset=offset)
+    jobs = await db.list_user_jobs(user["id"], limit=limit, offset=offset)
     return [_job_to_response(j) for j in jobs]
 
 
 @router.get("/jobs/uploads")
-async def list_uploads(request: Request):
-    """List audio files already on the server from previous jobs (for reprocessing)."""
+async def list_uploads(request: Request, user: dict = Depends(require_user)):
+    """List the current user's audio files already on the server (for reprocessing)."""
     db = request.app.state.db
-    settings = request.app.state.settings
 
-    jobs = await db.list_jobs(limit=100)
+    jobs = await db.list_user_jobs(user["id"], limit=200)
     uploads = []
     seen_files = set()
     for job in jobs:
@@ -116,18 +136,14 @@ async def reprocess_upload(
     min_speakers: str = Form(default=""),
     max_speakers: str = Form(default=""),
     retranscribe: str = Form(default="false"),
+    user: dict = Depends(require_user),
 ):
-    """Create a new job from an already-uploaded file (no re-upload needed).
-
-    When retranscribe=false and the source job has a completed transcript,
-    the transcript is copied to the new job so only summarization runs.
-    """
+    """Create a new job (owned by the current user) from an already-uploaded file."""
     db = request.app.state.db
     settings = request.app.state.settings
 
-    source_job = await db.get_job(source_job_id)
-    if source_job is None:
-        raise HTTPException(404, "Source job not found")
+    # Source must be the user's own job or a shared one.
+    source_job = await _get_visible_job(db, source_job_id, user)
 
     source_path = Path(source_job["file_path"])
     if not source_path.exists():
@@ -148,6 +164,7 @@ async def reprocess_upload(
 
     job = await db.create_job(
         job_id=job_id,
+        user_id=user["id"],
         filename=source_job["filename"],
         file_path=str(dest),
         file_size_bytes=source_job["file_size_bytes"],
@@ -159,11 +176,7 @@ async def reprocess_upload(
         max_speakers=max_spk,
     )
 
-    # If not re-transcribing and source has a completed transcript, copy it
-    use_cached = (
-        not retranscribe_on
-        and source_job.get("transcript_json") is not None
-    )
+    use_cached = not retranscribe_on and source_job.get("transcript_json") is not None
     if use_cached:
         await db.update_job(
             job_id,
@@ -180,17 +193,16 @@ async def reprocess_upload(
 
 
 @router.delete("/jobs/cleanup")
-async def cleanup_jobs(request: Request):
-    """Delete all failed jobs and their files. Keep completed and in-progress jobs."""
+async def cleanup_jobs(request: Request, user: dict = Depends(require_user)):
+    """Delete the current user's failed jobs and their files."""
     db = request.app.state.db
     settings = request.app.state.settings
 
-    jobs = await db.list_jobs(limit=500)
+    jobs = await db.list_user_jobs(user["id"], limit=1000)
     deleted = 0
     freed_bytes = 0
     for job in jobs:
         if job["status"] == "failed":
-            # Clean up files
             upload_dir = settings.upload_dir / job["id"]
             if upload_dir.exists():
                 for f in upload_dir.iterdir():
@@ -202,31 +214,37 @@ async def cleanup_jobs(request: Request):
             await db.delete_job(job["id"])
             deleted += 1
 
-    return {
-        "ok": True,
-        "deleted_jobs": deleted,
-        "freed_mb": round(freed_bytes / (1024 * 1024), 1),
-    }
+    return {"ok": True, "deleted_jobs": deleted, "freed_mb": round(freed_bytes / (1024 * 1024), 1)}
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(request: Request, job_id: str):
+async def get_job(request: Request, job_id: str, user: dict = Depends(require_user)):
     db = request.app.state.db
-    job = await db.get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = await _get_visible_job(db, job_id, user)
     return _job_to_response(job)
 
 
+@router.post("/jobs/{job_id}/share")
+async def set_share(
+    request: Request,
+    job_id: str,
+    user: dict = Depends(require_user),
+):
+    """Toggle a job between private and shared. Owner only."""
+    db = request.app.state.db
+    job = await _get_owned_job(db, job_id, user)
+    body = await request.json()
+    shared = bool(body.get("shared"))
+    await db.set_job_visibility(job_id, "shared" if shared else "private")
+    return {"ok": True, "job_id": job_id, "visibility": "shared" if shared else "private"}
+
+
 @router.delete("/jobs/{job_id}")
-async def delete_job(request: Request, job_id: str):
+async def delete_job(request: Request, job_id: str, user: dict = Depends(require_user)):
     db = request.app.state.db
     settings = request.app.state.settings
 
-    job = await db.get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
-
+    await _get_owned_job(db, job_id, user)
     await db.delete_job(job_id)
 
     upload_dir = settings.upload_dir / job_id
@@ -240,13 +258,11 @@ async def delete_job(request: Request, job_id: str):
 
 
 @router.post("/jobs/{job_id}/retry")
-async def retry_job(request: Request, job_id: str):
-    """Re-run the full pipeline on a failed job (file must still exist)."""
+async def retry_job(request: Request, job_id: str, user: dict = Depends(require_user)):
+    """Re-run the full pipeline on a failed job (owner only, file must still exist)."""
     db = request.app.state.db
 
-    job = await db.get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = await _get_owned_job(db, job_id, user)
 
     if job["status"] not in ("failed", "completed"):
         raise HTTPException(409, f"Job is currently {job['status']}, cannot retry")
@@ -255,7 +271,6 @@ async def retry_job(request: Request, job_id: str):
     if not file_path.exists():
         raise HTTPException(410, "Original audio file no longer exists")
 
-    # Reset job state for full re-processing
     await db.update_job(
         job_id, status="pending", progress_pct=0,
         status_message="Retrying...", error_message=None,
@@ -271,19 +286,15 @@ async def retry_job(request: Request, job_id: str):
 
 
 @router.post("/jobs/{job_id}/resummarize")
-async def resummarize_job(request: Request, job_id: str):
-    """Re-run summarization on a completed job that has a transcript but no summary."""
+async def resummarize_job(request: Request, job_id: str, user: dict = Depends(require_user)):
+    """Re-run summarization on a completed job (owner only)."""
     db = request.app.state.db
-    settings = request.app.state.settings
 
-    job = await db.get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found")
+    job = await _get_owned_job(db, job_id, user)
 
     if not job.get("transcript_json"):
         raise HTTPException(400, "Job has no transcript to summarize")
 
-    # Reset status for summarization
     await db.update_job(job_id, status="summarizing", progress_pct=85,
                         status_message="Re-running summarization...")
 
@@ -294,8 +305,10 @@ async def resummarize_job(request: Request, job_id: str):
 
 
 @router.get("/jobs/{job_id}/progress")
-async def job_progress_sse(request: Request, job_id: str):
+async def job_progress_sse(request: Request, job_id: str, user: dict = Depends(require_user)):
     db = request.app.state.db
+    # Authorize once up front (owner or shared).
+    await _get_visible_job(db, job_id, user)
 
     async def event_generator():
         while True:
@@ -330,21 +343,23 @@ async def job_progress_sse(request: Request, job_id: str):
 # ── Recording endpoints ──────────────────────────────────────────────
 
 @router.get("/recording/devices")
-async def recording_devices():
+async def recording_devices(user: dict = Depends(require_user)):
     """List available audio input devices."""
     from transkriptor.services.recorder import list_audio_devices
     return {"devices": list_audio_devices()}
 
 
 @router.get("/recording/status")
-async def recording_status(request: Request):
+async def recording_status(request: Request, user: dict = Depends(require_user)):
     """Get current recording status."""
     recorder = request.app.state.recorder
     return recorder.status
 
 
 @router.post("/recording/start")
-async def recording_start(request: Request, device_index: int = 0, device_name: str = ""):
+async def recording_start(
+    request: Request, device_index: int = 0, device_name: str = "", user: dict = Depends(require_user)
+):
     """Start recording from the specified audio device."""
     recorder = request.app.state.recorder
     try:
@@ -359,8 +374,9 @@ async def recording_stop(
     language: str = "auto",
     diarization_enabled: str = "true",
     summarization_enabled: str = "true",
+    user: dict = Depends(require_user),
 ):
-    """Stop recording and auto-submit to transcription pipeline."""
+    """Stop recording and auto-submit to transcription pipeline (owned by current user)."""
     recorder = request.app.state.recorder
     settings = request.app.state.settings
     db = request.app.state.db
@@ -370,7 +386,6 @@ async def recording_stop(
     except RuntimeError as e:
         raise HTTPException(409, str(e))
 
-    # Auto-create a job from the recording
     file_path = Path(result["file_path"])
     filename = result["filename"]
     file_size = result["file_size_bytes"]
@@ -380,7 +395,6 @@ async def recording_stop(
 
     job_id = uuid.uuid4().hex[:12]
 
-    # Move recording to upload dir
     job_dir = settings.upload_dir / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     dest = job_dir / filename
@@ -388,6 +402,7 @@ async def recording_stop(
 
     job = await db.create_job(
         job_id=job_id,
+        user_id=user["id"],
         filename=filename,
         file_path=str(dest),
         file_size_bytes=file_size,
@@ -405,31 +420,30 @@ async def recording_stop(
     return {**result, "job_id": job_id, "job_url": f"/jobs/{job_id}"}
 
 
-# ── Style profile endpoints ──────────────────────────────────────────
+# ── Style profile endpoints (per-user) ───────────────────────────────
 
 @router.get("/style/profile")
-async def get_style_profile(request: Request):
-    """Get the current writing style profile."""
-    settings = request.app.state.settings
-    from transkriptor.services.style_analyzer import load_style_profile
-    profile = load_style_profile(settings.style_profile_path)
+async def get_style_profile(request: Request, user: dict = Depends(require_user)):
+    """Get the current user's writing style profile."""
+    db = request.app.state.db
+    profile = await db.get_user_style_profile(user["id"])
     return {"profile": profile, "has_profile": profile is not None}
 
 
 @router.post("/style/analyze")
-async def analyze_style_from_text(request: Request):
-    """Analyze pasted writing samples and generate a style profile."""
+async def analyze_style_from_text(request: Request, user: dict = Depends(require_user)):
+    """Analyze pasted writing samples and generate the user's style profile."""
     settings = request.app.state.settings
+    db = request.app.state.db
     body = await request.json()
     samples = body.get("samples", [])
 
     if not samples or not any(s.strip() for s in samples):
         raise HTTPException(400, "Provide at least one non-empty writing sample")
 
-    # Filter empty samples and trim
     samples = [s.strip() for s in samples if s.strip()]
 
-    from transkriptor.services.style_analyzer import analyze_style, save_style_profile
+    from transkriptor.services.style_analyzer import analyze_style
     profile = await analyze_style(
         samples,
         backend=settings.summary_backend,
@@ -440,16 +454,16 @@ async def analyze_style_from_text(request: Request):
         openai_model=settings.openai_model,
     )
 
-    save_style_profile(settings.style_profile_path, profile)
+    await db.set_user_style_profile(user["id"], profile)
     return {"profile": profile}
 
 
 @router.post("/style/analyze-emails")
-async def analyze_style_from_emails(request: Request):
-    """Analyze sent emails to build a style profile (macOS Apple Mail)."""
+async def analyze_style_from_emails(request: Request, user: dict = Depends(require_user)):
+    """Analyze sent emails to build the user's style profile (macOS Apple Mail)."""
     settings = request.app.state.settings
+    db = request.app.state.db
 
-    # Collect sent emails via Apple Mail MCP or applescript
     import subprocess
     script = '''
     tell application "Mail"
@@ -476,7 +490,6 @@ async def analyze_style_from_emails(request: Request):
         if len(emails) < 3:
             raise HTTPException(400, f"Only found {len(emails)} sent emails. Need at least 3.")
 
-        # Take up to 10, limit each to 2000 chars
         samples = [e[:2000] for e in emails[:10]]
 
     except subprocess.TimeoutExpired:
@@ -484,7 +497,7 @@ async def analyze_style_from_emails(request: Request):
     except FileNotFoundError:
         raise HTTPException(500, "osascript not found — this feature requires macOS")
 
-    from transkriptor.services.style_analyzer import analyze_style, save_style_profile
+    from transkriptor.services.style_analyzer import analyze_style
     profile = await analyze_style(
         samples,
         backend=settings.summary_backend,
@@ -495,42 +508,38 @@ async def analyze_style_from_emails(request: Request):
         openai_model=settings.openai_model,
     )
 
-    save_style_profile(settings.style_profile_path, profile)
+    await db.set_user_style_profile(user["id"], profile)
     return {"profile": profile, "emails_analyzed": len(samples)}
 
 
 @router.post("/style/save")
-async def save_style(request: Request):
-    """Manually save/edit a style profile."""
-    settings = request.app.state.settings
+async def save_style(request: Request, user: dict = Depends(require_user)):
+    """Manually save/edit the user's style profile."""
+    db = request.app.state.db
     body = await request.json()
     profile = body.get("profile", "").strip()
 
     if not profile:
         raise HTTPException(400, "Profile text cannot be empty")
 
-    from transkriptor.services.style_analyzer import save_style_profile
-    save_style_profile(settings.style_profile_path, profile)
+    await db.set_user_style_profile(user["id"], profile)
     return {"profile": profile}
 
 
 @router.delete("/style/profile")
-async def delete_style_profile(request: Request):
-    """Remove the style profile (summaries will use default style)."""
-    settings = request.app.state.settings
-    path = settings.style_profile_path
-    if path.exists():
-        path.unlink()
+async def delete_style_profile(request: Request, user: dict = Depends(require_user)):
+    """Remove the user's style profile (summaries will use default style)."""
+    db = request.app.state.db
+    await db.set_user_style_profile(user["id"], None)
     return {"ok": True}
 
 
 @router.get("/gpu/metrics")
-async def gpu_metrics(request: Request):
+async def gpu_metrics(request: Request, user: dict = Depends(require_user)):
     """Fetch GPU metrics from DCGM exporter + gpu-manager on DGX Spark."""
     import httpx
 
     settings = request.app.state.settings
-    # Derive DGX Spark host from gpu_manager_url or openai_base_url
     spark_host = "192.168.178.190"
     if settings.gpu_manager_url:
         from urllib.parse import urlparse
@@ -551,14 +560,12 @@ async def gpu_metrics(request: Request):
     }
 
     async with httpx.AsyncClient(timeout=5.0) as client:
-        # 1) DCGM exporter metrics (Prometheus format)
         try:
             resp = await client.get(f"http://{spark_host}:9400/metrics")
             resp.raise_for_status()
             for line in resp.text.splitlines():
                 if line.startswith("#") or "{" not in line:
                     continue
-                # Parse "METRIC_NAME{labels} value"
                 name = line.split("{")[0]
                 value_str = line.rsplit("}", 1)[-1].strip()
                 try:
@@ -578,7 +585,6 @@ async def gpu_metrics(request: Request):
         except Exception as exc:
             result["error"] = f"DCGM: {exc}"
 
-        # 2) GPU manager status
         if settings.gpu_manager_url:
             try:
                 resp = await client.get(f"{settings.gpu_manager_url.rstrip('/')}/status")
@@ -600,13 +606,13 @@ async def gpu_metrics(request: Request):
 
 @router.get("/livez")
 async def liveness():
-    """Lightweight liveness probe — no external calls."""
+    """Lightweight liveness probe — no auth, no external calls."""
     return {"status": "ok"}
 
 
 @router.get("/readyz")
 async def readiness(request: Request):
-    """Readiness probe — checks DB is accessible."""
+    """Readiness probe — no auth; checks DB is accessible."""
     db = request.app.state.db
     try:
         await db.list_jobs(limit=1)
@@ -625,7 +631,6 @@ async def health_check(request: Request):
 
     import httpx
 
-    # Check transcription backend
     if settings.transcription_backend == "remote":
         try:
             async with httpx.AsyncClient(timeout=5) as client:
@@ -640,7 +645,6 @@ async def health_check(request: Request):
         checks["whisper_model"] = settings.whisper_model
         checks["hf_token_set"] = bool(settings.hf_token)
 
-    # Check summarization backend
     if settings.summary_backend == "ollama":
         try:
             async with httpx.AsyncClient(timeout=5) as client:

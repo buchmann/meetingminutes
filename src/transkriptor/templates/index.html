@@ -148,12 +148,24 @@
 <article>
     <header>
         <div style="display:flex;justify-content:space-between;align-items:center">
-            <h2 style="margin:0">Jobs</h2>
+            <h2 style="margin:0">My Jobs</h2>
             <button class="outline secondary" style="margin:0;padding:0.3rem 0.8rem;font-size:0.85rem" onclick="cleanupJobs(this)">Clean Up Failed</button>
         </div>
     </header>
     <div id="job-list" hx-get="/partials/jobs" hx-trigger="load, every 5s" hx-swap="innerHTML">
         <p aria-busy="true">Loading jobs...</p>
+    </div>
+</article>
+
+<article>
+    <header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+            <h2 style="margin:0">Shared with everyone</h2>
+            <small>Transcriptions other users have shared</small>
+        </div>
+    </header>
+    <div id="shared-list" hx-get="/partials/shared" hx-trigger="load, every 10s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading shared transcriptions...</p>
     </div>
 </article>
 

@@ -44,3 +44,11 @@ data:
   TRANSKRIPTOR_PORT: "8000"
   TRANSKRIPTOR_DATA_DIR: "/app/data"
   TRANSKRIPTOR_MAX_UPLOAD_SIZE_MB: "2048"
+
+  # Multi-user / authentication
+  # Admin is seeded on first start; the password comes from the
+  # transkriptor-secrets Secret (TRANSKRIPTOR_ADMIN_PASSWORD).
+  TRANSKRIPTOR_ADMIN_USERNAME: "admin"
+  TRANSKRIPTOR_SESSION_TTL_HOURS: "720"
+  # Ingress is plain HTTP (no TLS) so the session cookie must not be Secure-only.
+  TRANSKRIPTOR_SESSION_COOKIE_SECURE: "false"

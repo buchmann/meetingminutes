@@ -4,8 +4,19 @@
 
 <div style="display:flex; justify-content:space-between; align-items:center;">
     <a href="/">&larr; Back to Jobs</a>
-    <button id="delete-job-btn" class="outline secondary small" onclick="deleteJob()">Delete Job</button>
+    <div style="display:flex; gap:0.5rem; align-items:center;">
+        {% if not is_owner %}
+        <small style="opacity:0.7">Shared transcription (read-only)</small>
+        {% else %}
+        <button id="share-job-btn" class="outline small {% if job.visibility != 'shared' %}secondary{% endif %}"
+                data-shared="{% if job.visibility == 'shared' %}1{% else %}0{% endif %}" onclick="toggleShare()">
+            {% if job.visibility == 'shared' %}Unshare{% else %}Share{% endif %}
+        </button>
+        <button id="delete-job-btn" class="outline secondary small" onclick="deleteJob()">Delete Job</button>
+        {% endif %}
+    </div>
 </div>
+{% if is_owner %}
 <script>
     function deleteJob() {
         if (!confirm('Delete this job and all its files?')) return;
@@ -16,7 +27,24 @@
             .then(r => { if (r.ok) window.location.href = '/'; })
             .catch(() => { btn.disabled = false; btn.removeAttribute('aria-busy'); });
     }
+    async function toggleShare() {
+        const btn = document.getElementById('share-job-btn');
+        const makeShared = btn.dataset.shared !== '1';
+        btn.setAttribute('aria-busy', 'true');
+        try {
+            const r = await fetch('/api/jobs/{{ job.id }}/share', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shared: makeShared }),
+            });
+            if (r.ok) {
+                if (makeShared) { btn.textContent = 'Unshare'; btn.dataset.shared = '1'; btn.classList.remove('secondary'); }
+                else { btn.textContent = 'Share'; btn.dataset.shared = '0'; btn.classList.add('secondary'); }
+            }
+        } finally { btn.removeAttribute('aria-busy'); }
+    }
 </script>
+{% endif %}
 
 <article>
     <header>

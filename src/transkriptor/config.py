@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     port: int = 8000
     max_upload_size_mb: int = 500
 
+    # ── Multi-user / authentication ──────────────────────────────────
+    # Seed admin created on first startup when no users exist yet.
+    admin_username: str = "admin"
+    admin_password: str = ""  # set in .env to enable seeding; blank = skip seeding
+    # Session cookie lifetime in hours (default 30 days).
+    session_ttl_hours: int = 720
+    # Mark the session cookie Secure (enable when served over HTTPS).
+    session_cookie_secure: bool = False
+
     @property
     def upload_dir(self) -> Path:
         return self.data_dir / "uploads"

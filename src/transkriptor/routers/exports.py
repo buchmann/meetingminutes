@@ -1,14 +1,17 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse, JSONResponse
+
+from transkriptor.auth import require_user
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/jobs/{job_id}/export/{fmt}")
-async def export_job(request: Request, job_id: str, fmt: str):
+async def export_job(request: Request, job_id: str, fmt: str, user: dict = Depends(require_user)):
     db = request.app.state.db
     job = await db.get_job(job_id)
-    if job is None:
+    # Exportable if the user owns the job or it is shared.
+    if job is None or (job["user_id"] != user["id"] and job["visibility"] != "shared"):
         raise HTTPException(404, "Job not found")
     if job["status"] != "completed":
         raise HTTPException(400, "Job not yet completed")

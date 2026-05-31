@@ -14,6 +14,40 @@ from transkriptor.services.recorder import Recorder
 logger = logging.getLogger(__name__)
 
 
+async def _prune_orphan_dirs(settings: Settings, db: Database) -> None:
+    """Delete upload/output dirs that no longer have a matching job row."""
+    import shutil
+
+    job_ids = await db.all_job_ids()
+    for base in (settings.upload_dir, settings.output_dir):
+        if not base.exists():
+            continue
+        for child in base.iterdir():
+            if child.is_dir() and child.name not in job_ids:
+                shutil.rmtree(child, ignore_errors=True)
+                logger.info("Pruned orphan directory %s", child)
+
+
+async def _seed_admin(settings: Settings, db: Database) -> None:
+    """Create the initial admin from config when no users exist yet."""
+    if await db.count_users() > 0:
+        return
+    if not settings.admin_password:
+        logger.warning(
+            "No users exist and TRANSKRIPTOR_ADMIN_PASSWORD is unset — "
+            "set it in .env to seed the initial admin account."
+        )
+        return
+    from transkriptor.auth import hash_password
+
+    await db.create_user(
+        username=settings.admin_username,
+        password_hash=hash_password(settings.admin_password),
+        is_admin=True,
+    )
+    logger.info("Seeded initial admin user '%s'", settings.admin_username)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings: Settings = app.state.settings
@@ -23,6 +57,13 @@ async def lifespan(app: FastAPI):
     await db.initialize()
     await db.recover_stuck_jobs()
     app.state.db = db
+
+    # Remove orphaned upload/output directories left by deleted jobs
+    # (e.g. legacy jobs pruned during the multi-user migration).
+    await _prune_orphan_dirs(settings, db)
+
+    # Seed an initial admin account on first run.
+    await _seed_admin(settings, db)
 
     app.state.pipeline = Pipeline(settings, db)
     app.state.recorder = Recorder(output_dir=settings.data_dir / "recordings")
@@ -59,6 +100,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Transkriptor", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+
+    # ── Auth exception handlers ──────────────────────────────────────
+    from fastapi.responses import JSONResponse, RedirectResponse
+
+    from transkriptor.auth import NotAuthenticated, NotAuthorized
+
+    @app.exception_handler(NotAuthenticated)
+    async def _not_authenticated(request, exc):
+        if request.url.path.startswith("/api"):
+            return JSONResponse({"detail": "Authentication required"}, status_code=401)
+        nxt = request.url.path
+        return RedirectResponse(url=f"/login?next={nxt}", status_code=303)
+
+    @app.exception_handler(NotAuthorized)
+    async def _not_authorized(request, exc):
+        if request.url.path.startswith("/api"):
+            return JSONResponse({"detail": "Admin access required"}, status_code=403)
+        return RedirectResponse(url="/", status_code=303)
 
     base_dir = Path(__file__).resolve().parent
     project_root = base_dir.parent.parent

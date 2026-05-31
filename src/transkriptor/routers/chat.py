@@ -1,40 +1,37 @@
 """Router for the text improvement chat interface."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from transkriptor.services.style_analyzer import load_style_profile
+from transkriptor.auth import require_user
 from transkriptor.services.text_improver import improve_text
 
 router = APIRouter()
 
 
 @router.get("/chat")
-async def chat_page(request: Request):
+async def chat_page(request: Request, user: dict = Depends(require_user)):
     """Render the text improvement chat page."""
-    settings = request.app.state.settings
-    profile = load_style_profile(settings.style_profile_path)
+    db = request.app.state.db
+    profile = await db.get_user_style_profile(user["id"])
     return request.app.state.templates.TemplateResponse(
-        request, "chat.html", {"has_style_profile": profile is not None}
+        request, "chat.html", {"has_style_profile": profile is not None, "user": user}
     )
 
 
 @router.post("/api/chat/improve")
-async def api_improve_text(request: Request):
-    """Improve the submitted text using the configured LLM."""
+async def api_improve_text(request: Request, user: dict = Depends(require_user)):
+    """Improve the submitted text using the configured LLM and the user's style."""
     settings = request.app.state.settings
+    db = request.app.state.db
 
     body = await request.json()
     text = body.get("text", "").strip()
 
     if not text:
-        return JSONResponse(
-            {"error": "No text provided."},
-            status_code=400,
-        )
+        return JSONResponse({"error": "No text provided."}, status_code=400)
 
-    # Load style profile if available
-    style_profile = load_style_profile(settings.style_profile_path)
+    style_profile = await db.get_user_style_profile(user["id"])
 
     result = await improve_text(
         text,

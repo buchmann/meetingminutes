@@ -15,10 +15,21 @@
             <ul>
                 <li><a href="/"><strong>Transkriptor</strong></a></li>
             </ul>
+            {% if user %}
             <ul>
                 <li><a href="/chat" class="secondary"><small>Text Improver</small></a></li>
                 <li><a href="/settings" class="secondary"><small>Settings</small></a></li>
+                {% if user.is_admin %}
+                <li><a href="/admin/users" class="secondary"><small>Users</small></a></li>
+                {% endif %}
+                <li><small style="opacity:0.7">{{ user.username }}</small></li>
+                <li>
+                    <form method="post" action="/logout" style="margin:0">
+                        <button class="secondary outline" style="margin:0;padding:0.2rem 0.7rem;font-size:0.8rem">Logout</button>
+                    </form>
+                </li>
             </ul>
+            {% endif %}
         </nav>
     </header>
     <main class="container">

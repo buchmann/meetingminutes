@@ -1,4 +1,6 @@
 data/
+data.backup-*/
+backups/
 .env
 __pycache__/
 *.pyc
@@ -6,3 +8,8 @@ __pycache__/
 dist/
 build/
 .venv/
+
+# Local media / sample audio (don't commit large binaries)
+*.m4a
+*.mp3
+*.wav

@@ -142,8 +142,40 @@ All settings use the `TRANSKRIPTOR_` prefix and can be set via environment varia
 | `OTEL_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint |
 | `LANGUAGE` | `auto` | `en`, `de`, or `auto` |
 | `MAX_UPLOAD_SIZE_MB` | `500` | Maximum upload file size |
+| `ADMIN_USERNAME` | `admin` | Seed admin username (created on first run) |
+| `ADMIN_PASSWORD` | (empty) | Seed admin password — **set this to enable login** |
+| `SESSION_TTL_HOURS` | `720` | Session cookie lifetime (30 days) |
+| `SESSION_COOKIE_SECURE` | `false` | Mark session cookie `Secure` (enable behind HTTPS) |
 
 See `src/transkriptor/config.py` for the complete list.
+
+## Multi-user & Authentication
+
+Transkriptor supports multiple users with isolated private areas and an
+optional shared area.
+
+- **Login required.** Every page and API call requires a session
+  (cookie-based, server-side sessions). Unauthenticated browser requests
+  redirect to `/login`; API calls return `401`.
+- **Seeded admin.** On first startup, when no users exist, an admin account
+  is created from `TRANSKRIPTOR_ADMIN_USERNAME` / `TRANSKRIPTOR_ADMIN_PASSWORD`.
+  Set the password in `.env` before first run. (If unset, no user is created
+  and you won't be able to log in.)
+- **Admin-managed accounts.** Admins create/delete users and reset passwords
+  at **`/admin/users`**. There is no open self-registration.
+- **Private by default.** Each user only sees and manages their own
+  transcriptions (jobs, uploads, recordings) and their own writing-style
+  profile.
+- **Shared area.** A user can mark any of their transcriptions **Shared**
+  (toggle on the job list or detail page). Shared items appear in everyone's
+  "Shared with everyone" list and are viewable/exportable by all users, but
+  only the owner can edit, delete, or un-share them.
+- **Passwords** are hashed with PBKDF2-HMAC-SHA256 (stdlib; no extra deps).
+
+> **First-run migration:** when the multi-user schema is first applied to an
+> existing database, any pre-existing (owner-less) jobs are deleted and their
+> files pruned, for a clean multi-user start. Back up `data/` first if you
+> need to keep old jobs.
 
 ## API Endpoints
 
@@ -167,6 +199,7 @@ See `src/transkriptor/config.py` for the complete list.
 - **[Architecture & Code Guide](docs/architecture.md)** — code structure, services, data flow
 - **[Model Integration](docs/models.md)** — how Granite, WhisperX, and vLLM work together
 - **[Observability & Tracing](docs/tracing.md)** — OpenTelemetry setup, Instana integration, GPU metrics
+- **[Build & Deployment](docs/deployment.md)** — building the image on the `linux` server and deploying/rolling out to Kubernetes
 
 ## Tech Stack
 

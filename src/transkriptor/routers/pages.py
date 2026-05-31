@@ -120,6 +120,14 @@ async def partial_shared_list(request: Request, user: dict = Depends(require_use
     )
 
 
+@router.get("/system")
+async def system_page(request: Request, user: dict = Depends(require_user)):
+    """DGX Spark GPU / system utilization."""
+    return request.app.state.templates.TemplateResponse(
+        request, "system.html", {"user": user}
+    )
+
+
 @router.get("/settings")
 async def settings_page(request: Request, user: dict = Depends(require_user)):
     profile = user.get("style_profile")

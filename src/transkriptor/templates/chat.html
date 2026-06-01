@@ -31,7 +31,7 @@
                 <h3>Improved Text</h3>
                 <div class="chat-result-actions">
                     <span id="chat-lang-badge" class="tag"></span>
-                    <button class="outline small" onclick="copyResult()">Copy</button>
+                    <button class="outline small" onclick="copyResult(this)">Copy</button>
                 </div>
             </div>
         </header>
@@ -131,13 +131,42 @@ async function improveText() {
     }
 }
 
-function copyResult() {
+function copyResult(btn) {
     const text = document.getElementById('chat-improved').textContent;
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = event.target;
-        btn.textContent = 'Copied!';
-        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-    });
+    const flash = (msg) => {
+        const orig = 'Copy';
+        btn.textContent = msg;
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+    };
+    // Async Clipboard API only works in a secure context (HTTPS / localhost).
+    // Served over plain HTTP, navigator.clipboard is undefined (and throws in
+    // Safari), so fall back to the legacy execCommand approach.
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text)
+            .then(() => flash('Copied!'))
+            .catch(() => flash(legacyCopy(text) ? 'Copied!' : 'Copy failed'));
+    } else {
+        flash(legacyCopy(text) ? 'Copied!' : 'Copy failed');
+    }
+}
+
+function legacyCopy(text) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, text.length);  // iOS Safari
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+    } catch (e) {
+        return false;
+    }
 }
 
 function renderHistory() {

@@ -4,6 +4,12 @@ metadata:
   name: transkriptor
   namespace: transkriptor
   annotations:
+    # Self-signed: the lab domain resolves to a private IP, so Let's Encrypt
+    # HTTP-01 cannot validate it. Self-signed still provides an HTTPS secure
+    # context (needed for getUserMedia/clipboard) — browsers show a one-time
+    # trust prompt. Swap to letsencrypt-prod + DNS-01 for a trusted cert.
+    cert-manager.io/cluster-issuer: "selfsigned-issuer"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "2g"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
@@ -12,6 +18,10 @@ metadata:
     nginx.ingress.kubernetes.io/client-body-timeout: "300"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - transkriptor.lab.allwaysbeginner.com
+      secretName: transkriptor-tls
   rules:
     - host: transkriptor.lab.allwaysbeginner.com
       http:

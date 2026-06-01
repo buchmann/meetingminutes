@@ -9,9 +9,9 @@
     <div id="recorder-section">
         <div class="grid">
             <label>
-                Audio Source
+                Microphone
                 <select id="rec-device">
-                    <option value="">Loading devices...</option>
+                    <option value="">Default microphone</option>
                 </select>
             </label>
             <label>
@@ -158,58 +158,50 @@
 </article>
 
 <script>
-// ── Recording ──────────────────────────────────────────────────────
+// ── Recording (in-browser via MediaRecorder, uploaded to /api/jobs) ──
 let recTimerInterval = null;
 let recStartTime = null;
+let mediaRecorder = null;
+let recChunks = [];
+let recStream = null;
 
-// Load audio devices on page load
-(async function loadDevices() {
-    try {
-        const resp = await fetch('/api/recording/devices');
-        const data = await resp.json();
-        const select = document.getElementById('rec-device');
-        select.innerHTML = '';
-        for (const dev of data.devices) {
-            const opt = document.createElement('option');
-            opt.value = dev.index;
-            opt.textContent = dev.name;
-            opt.dataset.name = dev.name;
-            // Pre-select Aggregate Device or BlackHole
-            if (dev.name.includes('Aggregate') || dev.name.includes('BlackHole')) {
-                opt.selected = true;
-            }
-            select.appendChild(opt);
-        }
-    } catch (e) {
-        console.error('Failed to load devices:', e);
+const recSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+
+// Populate microphone list (device labels appear after the first permission grant)
+async function loadDevices() {
+    const select = document.getElementById('rec-device');
+    const errDiv = document.getElementById('rec-error');
+    if (!recSupported) {
+        document.getElementById('rec-start-btn').disabled = true;
+        errDiv.textContent = 'Recording needs microphone access, which browsers only allow over HTTPS (or localhost). Open this site via https://.';
+        errDiv.style.display = 'block';
+        return;
     }
-})();
-
-// Check if already recording (e.g. page refresh)
-(async function checkStatus() {
     try {
-        const resp = await fetch('/api/recording/status');
-        const data = await resp.json();
-        if (data.recording) {
-            showRecording(data.started_at);
-        }
-    } catch (e) {}
-})();
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        select.innerHTML = '<option value="">Default microphone</option>';
+        mics.forEach((d, i) => {
+            const opt = document.createElement('option');
+            opt.value = d.deviceId;
+            opt.textContent = d.label || `Microphone ${i + 1}`;
+            select.appendChild(opt);
+        });
+    } catch (e) { /* device labels need permission; ignore */ }
+}
+loadDevices();
 
-function showRecording(startedAt) {
-    document.getElementById('rec-start-btn').style.display = 'none';
-    document.getElementById('rec-stop-btn').style.display = '';
-    document.getElementById('rec-timer').style.display = '';
-    document.getElementById('rec-device').disabled = true;
-
-    recStartTime = startedAt ? new Date(startedAt) : new Date();
-    recTimerInterval = setInterval(updateTimer, 1000);
-    updateTimer();
+function pickMime() {
+    const prefs = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+    for (const m of prefs) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return '';
 }
 
 function updateTimer() {
-    const elapsed = Math.floor((Date.now() - recStartTime.getTime()) / 1000);
-    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+    const mm = String(Math.floor(elapsed / 60) % 60).padStart(2, '0');
     const ss = String(elapsed % 60).padStart(2, '0');
     const hh = Math.floor(elapsed / 3600);
     document.getElementById('rec-timer').textContent =
@@ -217,64 +209,98 @@ function updateTimer() {
 }
 
 async function startRecording() {
-    const select = document.getElementById('rec-device');
-    const idx = parseInt(select.value);
-    const name = select.options[select.selectedIndex].dataset.name || '';
     const errDiv = document.getElementById('rec-error');
     errDiv.style.display = 'none';
-
-    try {
-        const resp = await fetch(`/api/recording/start?device_index=${idx}&device_name=${encodeURIComponent(name)}`, { method: 'POST' });
-        if (!resp.ok) {
-            const err = await resp.json();
-            throw new Error(err.detail || 'Failed to start recording');
-        }
-        const data = await resp.json();
-        showRecording(data.started_at);
-    } catch (e) {
-        errDiv.textContent = e.message;
+    if (!recSupported) {
+        errDiv.textContent = 'Recording requires HTTPS and a microphone.';
         errDiv.style.display = 'block';
+        return;
+    }
+    const deviceId = document.getElementById('rec-device').value;
+    try {
+        recStream = await navigator.mediaDevices.getUserMedia({
+            audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+        });
+    } catch (e) {
+        errDiv.textContent = 'Microphone access denied or unavailable: ' + e.message;
+        errDiv.style.display = 'block';
+        return;
+    }
+    loadDevices();  // labels are available now that permission was granted
+
+    const mime = pickMime();
+    recChunks = [];
+    mediaRecorder = mime ? new MediaRecorder(recStream, { mimeType: mime }) : new MediaRecorder(recStream);
+    mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+    mediaRecorder.onstop = uploadRecording;
+    mediaRecorder.start();
+
+    document.getElementById('rec-start-btn').style.display = 'none';
+    document.getElementById('rec-stop-btn').style.display = '';
+    document.getElementById('rec-timer').style.display = '';
+    document.getElementById('rec-device').disabled = true;
+    recStartTime = Date.now();
+    recTimerInterval = setInterval(updateTimer, 1000);
+    updateTimer();
+}
+
+function stopRecording() {
+    const btn = document.getElementById('rec-stop-btn');
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    clearInterval(recTimerInterval);
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();  // triggers uploadRecording via onstop
     }
 }
 
-async function stopRecording() {
+async function uploadRecording() {
     const btn = document.getElementById('rec-stop-btn');
     const errDiv = document.getElementById('rec-error');
-    errDiv.style.display = 'none';
-    btn.setAttribute('aria-busy', 'true');
-    btn.disabled = true;
+    if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
 
-    clearInterval(recTimerInterval);
+    const type = (mediaRecorder && mediaRecorder.mimeType) || (recChunks[0] && recChunks[0].type) || 'audio/webm';
+    const ext = type.includes('mp4') ? 'mp4' : (type.includes('ogg') ? 'ogg' : 'webm');
+    const blob = new Blob(recChunks, { type });
+    if (!blob.size) {
+        errDiv.textContent = 'No audio captured.';
+        errDiv.style.display = 'block';
+        resetRecUI();
+        return;
+    }
 
-    const lang = document.getElementById('rec-language').value;
-    const diar = document.getElementById('rec-diarization').checked;
-    const summ = document.getElementById('rec-summarization').checked;
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const form = new FormData();
+    form.set('file', blob, `recording_${ts}.${ext}`);
+    form.set('language', document.getElementById('rec-language').value);
+    form.set('diarization_enabled', document.getElementById('rec-diarization').checked.toString());
+    form.set('summarization_enabled', document.getElementById('rec-summarization').checked.toString());
 
+    btn.textContent = 'Uploading…';
     try {
-        const params = new URLSearchParams({
-            language: lang,
-            diarization_enabled: diar.toString(),
-            summarization_enabled: summ.toString(),
-        });
-        const resp = await fetch(`/api/recording/stop?${params}`, { method: 'POST' });
+        const resp = await fetch('/api/jobs', { method: 'POST', body: form });
         if (!resp.ok) {
-            const err = await resp.json();
-            throw new Error(err.detail || 'Failed to stop recording');
+            const e = await resp.json();
+            throw new Error(e.detail || 'Upload failed');
         }
-        const data = await resp.json();
-        window.location.href = data.job_url;
+        const job = await resp.json();
+        window.location.href = '/jobs/' + job.id;
     } catch (e) {
         errDiv.textContent = e.message;
         errDiv.style.display = 'block';
-        // Reset UI
-        document.getElementById('rec-start-btn').style.display = '';
-        document.getElementById('rec-stop-btn').style.display = 'none';
-        document.getElementById('rec-timer').style.display = 'none';
-        document.getElementById('rec-device').disabled = false;
-    } finally {
-        btn.removeAttribute('aria-busy');
-        btn.disabled = false;
+        resetRecUI();
     }
+}
+
+function resetRecUI() {
+    const btn = document.getElementById('rec-stop-btn');
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+    btn.innerHTML = '<span class="stop-icon"></span> Stop &amp; Transcribe';
+    document.getElementById('rec-start-btn').style.display = '';
+    document.getElementById('rec-stop-btn').style.display = 'none';
+    document.getElementById('rec-timer').style.display = 'none';
+    document.getElementById('rec-device').disabled = false;
 }
 
 // ── Reprocess existing files ──────────────────────────────────────

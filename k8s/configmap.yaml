@@ -50,5 +50,5 @@ data:
   # transkriptor-secrets Secret (TRANSKRIPTOR_ADMIN_PASSWORD).
   TRANSKRIPTOR_ADMIN_USERNAME: "admin"
   TRANSKRIPTOR_SESSION_TTL_HOURS: "720"
-  # Ingress is plain HTTP (no TLS) so the session cookie must not be Secure-only.
-  TRANSKRIPTOR_SESSION_COOKIE_SECURE: "false"
+  # Ingress now serves HTTPS (ssl-redirect) so the session cookie is Secure.
+  TRANSKRIPTOR_SESSION_COOKIE_SECURE: "true"

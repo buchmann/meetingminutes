@@ -26,7 +26,7 @@ runs the FastAPI web app.
 | Cluster API | `https://192.168.178.35:6443` (nodes: `master-node`, `worker-node1`, `worker-node2`) |
 | Namespace | `transkriptor` |
 | Storage | PVC `transkriptor-data` (20Gi, `local-path`) mounted at `/app/data` |
-| Ingress | nginx, host `transkriptor.lab.allwaysbeginner.com` (plain HTTP) |
+| Ingress | nginx, host `transkriptor.lab.allwaysbeginner.com`, **HTTPS** (cert-manager `selfsigned-issuer`, ssl-redirect) |
 | Backends (DGX) | whisperx `:8003`, vLLM `:8001`, gpu-manager `:9090`, Instana OTLP `:4328` |
 
 > **Why build on `linux`?** The cluster nodes are `amd64`; the Mac is `arm64`.
@@ -107,8 +107,30 @@ Authentication is configured via env (see the [Multi-user section of the README]
   ```yaml
   TRANSKRIPTOR_ADMIN_USERNAME: "admin"
   TRANSKRIPTOR_SESSION_TTL_HOURS: "720"
-  TRANSKRIPTOR_SESSION_COOKIE_SECURE: "false"   # ingress is plain HTTP
+  TRANSKRIPTOR_SESSION_COOKIE_SECURE: "true"    # ingress serves HTTPS
   ```
+
+### TLS
+
+The ingress terminates TLS via **cert-manager**. The lab domain resolves to a
+private IP, so Let's Encrypt HTTP-01 cannot validate it — the ingress therefore
+uses the **`selfsigned-issuer`** ClusterIssuer (`cert-manager.io/cluster-issuer:
+selfsigned-issuer` annotation + a `tls:` block writing to the `transkriptor-tls`
+secret). This provides a valid HTTPS **secure context** (required for the
+browser microphone/`getUserMedia` and the clipboard API), at the cost of a
+one-time browser trust prompt. `ssl-redirect` forces HTTP → HTTPS.
+
+To switch to a browser-trusted cert, use `letsencrypt-prod` with a **DNS-01**
+solver (the domain isn't internet-reachable for HTTP-01) or install a wildcard
+cert for `*.lab.allwaysbeginner.com` as the `transkriptor-tls` secret.
+
+### Recording
+
+Recording is **in-browser** (`MediaRecorder` + `getUserMedia`); the captured
+audio is uploaded to `POST /api/jobs` like any other file. This works wherever
+the page is a secure context (HTTPS or `localhost`). The legacy server-side
+ffmpeg/avfoundation recorder only works on a macOS host and is unused by the
+deployed UI.
 - **Deployment** consumes both:
   ```yaml
   envFrom:

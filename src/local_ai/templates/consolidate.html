@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Consolidator — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Multi-Source Consolidator</h2>
+        <small>
+            Combine multiple meetings and uploaded documents into one structured deliverable:
+            an executive summary, a product specification, or a project specification.
+            {% if has_style_profile %}Your writing style will be applied.{% else %}Add a style profile in <a href="/settings">Settings</a> to apply it.{% endif %}
+        </small>
+    </header>
+
+    <form id="consol-form" enctype="multipart/form-data">
+        <h4>1. Pick the output</h4>
+        <div class="grid">
+            <label>
+                Document type
+                <select name="output_type" id="consol-type">
+                    <option value="summary" selected>{{ labels.en.summary }}</option>
+                    <option value="product_spec">{{ labels.en.product_spec }}</option>
+                    <option value="project_spec">{{ labels.en.project_spec }}</option>
+                </select>
+            </label>
+            <label>
+                Language
+                <select name="language" id="consol-language">
+                    <option value="en" selected>English</option>
+                    <option value="de">Deutsch</option>
+                </select>
+            </label>
+            <label>
+                Output format
+                <select name="output_format" id="consol-output">
+                    <option value="docx" selected>Word (.docx)</option>
+                    <option value="pdf">PDF (.pdf)</option>
+                    <option value="md">Markdown (.md)</option>
+                    <option value="txt">Plain Text (.txt)</option>
+                </select>
+            </label>
+            <label>
+                Save to project <small>(optional)</small>
+                <select name="project_id" id="consol-project">
+                    <option value="" selected>— Download only —</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+
+        <h4>2. Pick the sources</h4>
+        <small>Check meetings you want to include. Add additional documents below.</small>
+
+        {% if jobs %}
+        <div id="consol-jobs" style="max-height:18rem;overflow-y:auto;border:1px solid var(--muted-border-color,#ccc);border-radius:0.4rem;padding:0.5rem;margin:0.5rem 0">
+            {% for job in jobs %}
+            <label style="display:flex;gap:0.5rem;align-items:center;margin:0.2rem 0">
+                <input type="checkbox" name="job_ids" value="{{ job.id }}">
+                <span style="flex:1">
+                    <strong>{{ job.filename }}</strong>
+                    {% if job.duration_secs %}
+                    <small style="color:var(--muted-color,#888)"> · {{ (job.duration_secs // 60) | int }}m {{ (job.duration_secs % 60) | int }}s</small>
+                    {% endif %}
+                    {% if job.has_summary %}<span class="tag" style="font-size:0.7em">summary</span>{% endif %}
+                    {% if job.created_at %}
+                    <small style="color:var(--muted-color,#888);float:right">{{ job.created_at[:10] }}</small>
+                    {% endif %}
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+        <label style="display:flex;align-items:center;gap:0.5rem">
+            <input type="checkbox" name="use_summaries" value="true" checked>
+            Use job summaries when available <small style="color:var(--muted-color,#888)">(faster; uncheck to use full transcripts)</small>
+        </label>
+        {% else %}
+        <p><small>No completed jobs available — upload a meeting first, or add documents below.</small></p>
+        {% endif %}
+
+        <h4 style="margin-top:1.5rem">3. Add documents (optional)</h4>
+        <label>
+            <input id="consol-files" type="file" name="files" multiple
+                   accept=".docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            <small>Word, PDF, Markdown, or plain text — up to 25 MB each. Select multiple files with Cmd/Ctrl-click.</small>
+        </label>
+
+        <label style="display:flex;align-items:center;gap:0.5rem;margin:0.5rem 0">
+            <input id="consol-apply-style" type="checkbox" name="apply_style" value="true"
+                   {% if has_style_profile %}checked{% else %}disabled{% endif %}>
+            Apply my writing style
+            {% if not has_style_profile %}
+            <small style="color:var(--muted-color,#888)">(no profile yet)</small>
+            {% endif %}
+        </label>
+
+        <div class="halluci" data-default="0.1" style="margin:0.8rem 0;padding:0.6rem 0.8rem;border:1px solid var(--muted-border-color,#ccc);border-radius:0.4rem">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
+                <label style="margin:0">Halluzination / Kreativität: <strong class="halluci-value">0.10</strong></label>
+                <button type="button" class="halluci-reset outline secondary" style="margin:0;padding:0.2rem 0.7rem;font-size:0.8rem">Reset auf Standard</button>
+            </div>
+            <input type="range" class="halluci-slider" min="0" max="1" step="0.05" style="width:100%;margin:0.4rem 0 0">
+            <small style="color:var(--muted-color,#888)">Niedrig = streng quellenbasiert (weniger Halluzination) · Hoch = freier. Standard: 0.10</small>
+        </div>
+
+        <button id="consol-btn" type="submit">Generate &amp; Download</button>
+    </form>
+
+    <div id="consol-status" class="error-message" style="display:none;margin-top:1rem"></div>
+    <div id="consol-meta" style="display:none;margin-top:1rem">
+        <p>
+            <strong>Done.</strong>
+            <span id="consol-meta-text"></span>
+        </p>
+        <small id="consol-meta-warning" class="error-text" style="display:none"></small>
+    </div>
+</article>
+
+<script>
+const cForm = document.getElementById('consol-form');
+const cBtn = document.getElementById('consol-btn');
+const cStatus = document.getElementById('consol-status');
+const cMeta = document.getElementById('consol-meta');
+const cMetaText = document.getElementById('consol-meta-text');
+const cMetaWarn = document.getElementById('consol-meta-warning');
+
+cForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    cStatus.style.display = 'none';
+    cMeta.style.display = 'none';
+    cMetaWarn.style.display = 'none';
+
+    const checkedJobs = cForm.querySelectorAll('input[name="job_ids"]:checked').length;
+    const uploaded = (cForm.querySelector('input[name="files"]')?.files?.length || 0);
+    if (!checkedJobs && !uploaded) {
+        cStatus.textContent = 'Pick at least one meeting or upload at least one document.';
+        cStatus.style.display = 'block';
+        return;
+    }
+
+    cBtn.disabled = true;
+    cBtn.setAttribute('aria-busy', 'true');
+    cBtn.textContent = 'Generating (this can take a couple of minutes)...';
+
+    const fd = new FormData(cForm);
+    if (!fd.get('apply_style')) fd.set('apply_style', 'false');
+    if (!fd.get('use_summaries')) fd.set('use_summaries', 'false');
+    fd.set('temperature', window.halluciValue());
+
+    try {
+        const resp = await fetch('/api/consolidate', { method: 'POST', body: fd });
+        if (!resp.ok) {
+            let msg = 'Server error (' + resp.status + ')';
+            try { const j = await resp.json(); msg = j.detail || msg; } catch (_e) {}
+            throw new Error(msg);
+        }
+
+        const sourcesCount = resp.headers.get('X-Sources-Count') || '?';
+        const truncated = resp.headers.get('X-Truncated') === '1';
+        const styleApplied = resp.headers.get('X-Style-Applied') === '1';
+        const outType = resp.headers.get('X-Output-Type') || '';
+        const lang = resp.headers.get('X-Language') || '';
+        const projectSaved = resp.headers.get('X-Project-Saved') === '1';
+        const projectSel = document.getElementById('consol-project');
+        const projectName = projectSel ? projectSel.options[projectSel.selectedIndex].text : '';
+
+        let filename = 'consolidated-document';
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^"]+)"?/i);
+        if (m) filename = m[1];
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        cMetaText.textContent =
+            `Type: ${outType} · Lang: ${lang} · Sources: ${sourcesCount}`
+            + (styleApplied ? ' · style applied' : '')
+            + (projectSaved ? ` · saved to project “${projectName}”` : '');
+        if (truncated) {
+            cMetaWarn.textContent = 'Note: source pack was truncated to fit the model context.';
+            cMetaWarn.style.display = 'block';
+        }
+        cMeta.style.display = 'block';
+
+    } catch (err) {
+        cStatus.textContent = err.message;
+        cStatus.style.display = 'block';
+    } finally {
+        cBtn.disabled = false;
+        cBtn.removeAttribute('aria-busy');
+        cBtn.textContent = 'Generate & Download';
+    }
+});
+</script>
+
+{% endblock %}

@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: transkriptor
-  namespace: transkriptor
+  name: local-ai
+  namespace: local-ai
   annotations:
     # Self-signed: the lab domain resolves to a private IP, so Let's Encrypt
     # HTTP-01 cannot validate it. Self-signed still provides an HTTPS secure
@@ -20,16 +20,16 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - transkriptor.lab.allwaysbeginner.com
-      secretName: transkriptor-tls
+        - local-ai.lab.allwaysbeginner.com
+      secretName: local-ai-tls
   rules:
-    - host: transkriptor.lab.allwaysbeginner.com
+    - host: local-ai.lab.allwaysbeginner.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: transkriptor
+                name: local-ai
                 port:
                   number: 80

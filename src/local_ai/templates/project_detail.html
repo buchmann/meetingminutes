@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} — local-ai{% endblock %}
+{% block content %}
+
+<p><small><a href="/projects">← All projects</a></small></p>
+
+<article>
+    <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem">
+        <h2 style="margin:0">{{ project.name }}</h2>
+        <details class="dropdown" style="margin:0">
+            <summary role="button" class="outline secondary" style="padding:0.2rem 0.8rem">Edit</summary>
+            <article style="min-width:22rem">
+                <form method="post" action="/api/projects/{{ project.id }}">
+                    <label>Name
+                        <input type="text" name="name" value="{{ project.name }}" required>
+                    </label>
+                    <label>Description
+                        <textarea name="description" rows="4">{{ project.description }}</textarea>
+                    </label>
+                    <button type="submit">Save</button>
+                </form>
+                <form method="post" action="/api/projects/{{ project.id }}/delete"
+                      onsubmit="return confirm('Delete this project and all its documents?')">
+                    <button type="submit" class="secondary outline" style="--pico-color:#c0392b;--pico-border-color:#c0392b">Delete project</button>
+                </form>
+            </article>
+        </details>
+    </header>
+    {% if project.description %}
+    <p style="white-space:pre-wrap">{{ project.description }}</p>
+    {% else %}
+    <small style="color:var(--muted-color,#888)">No description yet — use Edit to add one.</small>
+    {% endif %}
+</article>
+
+<article>
+    <header><strong>Documents</strong> <small style="color:var(--muted-color,#888)">({{ docs|length }})</small></header>
+
+    {% if docs %}
+    <table>
+        <thead>
+            <tr><th>Title</th><th>Type</th><th>Source</th><th>Added</th><th>Download</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for d in docs %}
+            <tr>
+                <td>{{ d.title }}</td>
+                <td><span class="tag" style="font-size:0.75em">{{ doc_type_labels.get(d.doc_type, d.doc_type) }}</span></td>
+                <td><small>{{ d.source or '—' }}</small></td>
+                <td><small>{{ d.created_at[:10] }}</small></td>
+                <td>
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=docx"><small>docx</small></a> ·
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=pdf"><small>pdf</small></a> ·
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=md"><small>md</small></a> ·
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=txt"><small>txt</small></a>
+                </td>
+                <td>
+                    <form method="post" action="/api/projects/docs/{{ d.id }}/delete" style="margin:0"
+                          onsubmit="return confirm('Delete this document?')">
+                        <button type="submit" class="secondary outline" style="margin:0;padding:0.1rem 0.5rem;font-size:0.75rem">✕</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p><small>No documents yet. Add one below, or send Consolidator output here.</small></p>
+    {% endif %}
+
+    <details style="margin-top:1rem">
+        <summary role="button" class="secondary outline">+ Add document</summary>
+        <form method="post" action="/api/projects/{{ project.id }}/docs" enctype="multipart/form-data" style="margin-top:0.8rem">
+            <label>Title <small>(for pasted text)</small>
+                <input type="text" name="title" placeholder="e.g. Kickoff notes">
+            </label>
+            <label>Paste text <small>(Markdown supported)</small>
+                <textarea name="content" rows="5" placeholder="Paste content here…"></textarea>
+            </label>
+            <label>…or upload files
+                <input type="file" name="files" multiple accept=".docx,.pdf,.txt,.md">
+                <small>Word, PDF, Markdown or text — up to 25 MB each.</small>
+            </label>
+            <button type="submit">Add to project</button>
+        </form>
+    </details>
+</article>
+
+{% endblock %}

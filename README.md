@@ -1,16 +1,31 @@
-# Transkriptor
+# local-ai
 
 Local, privacy-first meeting transcription app. Upload or record audio, get speaker-attributed transcripts with timestamps and AI-generated meeting minutes. All processing runs on your own hardware — nothing leaves your network.
 
 ## What It Does
 
+**Meetings**
 - **Transcription** — WhisperX on GPU produces word-level timestamps with automatic language detection (English/German/mixed)
 - **Speaker Diarization** — identifies who said what, with color-coded speaker labels
-- **AI Summaries** — structured meeting minutes with topics, action items, decisions, timeline, and next steps
-- **Text Improver** — paste emails or Slack messages, get corrected versions in your personal writing style
-- **Live Recording** — record system audio directly from the browser via BlackHole/Aggregate Device
+- **AI Summaries** — structured meeting minutes (topics, action items, decisions, timeline, next steps), standard or detailed (~2×)
+- **Live Recording** — record mic + system/meeting audio directly from the browser
 - **Export** — download transcripts as TXT, SRT (subtitles), or JSON
-- **GPU Monitoring** — live dashboard showing GPU utilization, temperature, power, and running services
+
+**Textfunctions**
+- **Text Improver** — paste emails or messages, get corrected versions in your personal writing style
+- **Document Checker** — extract docx/pdf/txt/md (with OCR fallback), improve, export to docx/pdf/md/txt
+- **Translator** — EN↔DE for pasted text or whole documents
+- **Consolidator** — combine several meetings + documents into one summary / product spec / project spec
+
+**Projects** — a workspace grouping a description plus generated or uploaded documents; the Consolidator can save its output straight into a project
+
+**PA (Personal Assistant)**
+- **Web Search** — ad-free results via self-hosted SearXNG, with an optional cited LLM answer
+- **Notes & Manuals** — hybrid semantic (bge-m3 embeddings) / keyword RAG over your uploaded docs
+- **E-Mail digest** — weekly "important mail" digest across Gmail/Yahoo/T-Online over IMAP (read-only + reply)
+- **Immobilien** — landlord module: check a Hausgeld statement for apportionability (BetrKV) + arithmetic
+
+**Platform** — multi-user auth (private + shared areas), per-feature creativity/temperature dial, TLS, live GPU monitoring dashboard, OpenTelemetry/Instana tracing
 
 ## Architecture
 
@@ -21,21 +36,25 @@ Browser (HTMX + PicoCSS)
 Kubernetes (.35 cluster, nginx ingress)
     |
     v
-Transkriptor Pod (FastAPI, SQLite, SSE progress)
+local-ai Pod (FastAPI, SQLite, SSE progress)
     |
-    +---> DGX Spark GPU Server (192.168.178.190)
-    |       |--- WhisperX         (port 8003)  — transcription + diarization
-    |       |--- vLLM Granite 8B  (port 8001)  — summarization (default, 8k context)
-    |       |--- vLLM GPT-OSS 120B (port 8000) — summarization (alt, 32k context)
-    |       |--- GPU Manager      (port 9090)  — orchestrates GPU memory allocation
-    |       |--- DCGM Exporter    (port 9400)  — GPU metrics
-    |       |--- OTEL Collector   (port 4317)  — telemetry relay to Instana
+    +---> SearXNG (in-cluster, port 8080) — ad-free web search
     |
-    +---> Instana Agent (observability)
-            |--- Application traces (pipeline spans, LLM calls)
-            |--- LLM metrics (token counts, latency)
-            |--- GPU metrics (utilization, temp, power)
+    +---> DGX Spark GPU Server (192.168.178.190, GB10, 128GB unified)
+    |       |--- WhisperX             (port 8003)  — transcription + diarization
+    |       |--- vLLM Granite 4.0-H-Small (port 8001) — LLM, 32k context (production)
+    |       |--- vLLM bge-m3           (port 8002)  — embeddings for RAG
+    |       |--- vLLM gpt-oss-120b     (port 8000)  — alt LLM, MXFP4 (experimental, off)
+    |       |--- GPU Manager / DCGM    (port 9090/9400) — GPU metrics
+    |       |--- OTEL Collector        (port 4317)  — telemetry relay to Instana
+    |
+    +---> External IMAP/SMTP (Gmail, Yahoo, T-Online) — E-Mail digest
+    |
+    +---> Instana Agent (observability) — traces, LLM + GPU metrics
 ```
+
+See [docs/architecture.md](docs/architecture.md) for rendered Mermaid diagrams
+(deployment topology, function map, processing pipeline).
 
 The app runs in two modes:
 - **Remote mode** (production): lightweight pod in Kubernetes, GPU work offloaded to DGX Spark
@@ -90,7 +109,7 @@ cp .env.example .env
 # Edit .env with your settings
 
 # Run
-python -m transkriptor
+python -m local-ai
 # Open http://127.0.0.1:8000
 ```
 
@@ -106,9 +125,9 @@ kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/ingress.yaml
 
 # Build and push image
-docker build -t mbx1010/transkriptor:latest .
-docker push mbx1010/transkriptor:latest
-kubectl rollout restart deployment/transkriptor -n transkriptor
+docker build -t mbx1010/local-ai:latest .
+docker push mbx1010/local-ai:latest
+kubectl rollout restart deployment/local-ai -n local-ai
 ```
 
 ### DGX Spark Services
@@ -128,7 +147,7 @@ The GPU server needs these containers running:
 
 ## Configuration
 
-All settings use the `TRANSKRIPTOR_` prefix and can be set via environment variables or `.env` file:
+All settings use the `LOCAL_AI_` prefix and can be set via environment variables or `.env` file:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -147,18 +166,18 @@ All settings use the `TRANSKRIPTOR_` prefix and can be set via environment varia
 | `SESSION_TTL_HOURS` | `720` | Session cookie lifetime (30 days) |
 | `SESSION_COOKIE_SECURE` | `false` | Mark session cookie `Secure` (enable behind HTTPS) |
 
-See `src/transkriptor/config.py` for the complete list.
+See `src/local-ai/config.py` for the complete list.
 
 ## Multi-user & Authentication
 
-Transkriptor supports multiple users with isolated private areas and an
+local-ai supports multiple users with isolated private areas and an
 optional shared area.
 
 - **Login required.** Every page and API call requires a session
   (cookie-based, server-side sessions). Unauthenticated browser requests
   redirect to `/login`; API calls return `401`.
 - **Seeded admin.** On first startup, when no users exist, an admin account
-  is created from `TRANSKRIPTOR_ADMIN_USERNAME` / `TRANSKRIPTOR_ADMIN_PASSWORD`.
+  is created from `LOCAL_AI_ADMIN_USERNAME` / `LOCAL_AI_ADMIN_PASSWORD`.
   Set the password in `.env` before first run. (If unset, no user is created
   and you won't be able to log in.)
 - **Admin-managed accounts.** Admins create/delete users and reset passwords

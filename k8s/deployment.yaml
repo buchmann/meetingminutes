@@ -1,32 +1,37 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: transkriptor
-  namespace: transkriptor
+  name: local-ai
+  namespace: local-ai
   labels:
-    app: transkriptor
+    app: local-ai
 spec:
   replicas: 1
+  # Recreate (not RollingUpdate): the data PVC is a node-local RWO volume, so a
+  # second pod can't mount it on another node, and the new pod is pinned to the
+  # same node where it lacks CPU while the old pod runs → rolling update deadlocks.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app: transkriptor
+      app: local-ai
   template:
     metadata:
       labels:
-        app: transkriptor
+        app: local-ai
     spec:
       containers:
-        - name: transkriptor
-          image: mbx1010/transkriptor:latest
+        - name: local-ai
+          image: mbx1010/local-ai:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
               name: http
           envFrom:
             - configMapRef:
-                name: transkriptor-config
+                name: local-ai-config
             - secretRef:
-                name: transkriptor-secrets
+                name: local-ai-secrets
           volumeMounts:
             - name: data
               mountPath: /app/data
@@ -54,4 +59,4 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: transkriptor-data
+            claimName: local-ai-data

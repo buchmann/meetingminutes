@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}E-Mail Digest — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>E-Mail Digest</h2>
+        <small>
+            Wichtige E-Mails der Woche über alle Konten (Posteingang + Spam) — dein lokales LLM
+            stuft ein, was persönlich &amp; wichtig ist, und rettet wichtige Mails, die fälschlich im
+            Spam gelandet sind. <strong>Nur lesend</strong> — es wird nichts verschoben oder gelöscht.
+        </small>
+    </header>
+
+    {% if not enabled %}
+    <p class="error-message">E-Mail-Funktion nicht konfiguriert (kein Verschlüsselungs-Key gesetzt).</p>
+    {% else %}
+
+    <!-- ── Konten ─────────────────────────────────────────── -->
+    <h4>Konten</h4>
+    <div id="email-accounts">
+        {% if accounts %}
+        <table>
+            <tbody>
+            {% for a in accounts %}
+            <tr data-id="{{ a.id }}">
+                <td><span class="tag">{{ providers[a.provider].label if a.provider in providers else a.provider }}</span></td>
+                <td>{{ a.email_address }}</td>
+                <td style="text-align:right">
+                    <button class="outline secondary" style="margin:0;padding:0.2rem 0.6rem;font-size:0.8rem"
+                            onclick="deleteAccount('{{ a.id }}', this)">Entfernen</button>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p><small>Noch keine Konten. Füge unten ein Konto hinzu.</small></p>
+        {% endif %}
+    </div>
+
+    <details style="margin:0.5rem 0">
+        <summary style="cursor:pointer"><strong>Konto hinzufügen</strong></summary>
+        <div class="grid" style="margin-top:0.5rem">
+            <label>Anbieter
+                <select id="acc-provider">
+                    {% for key, p in providers.items() %}
+                    <option value="{{ key }}">{{ p.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>E-Mail-Adresse
+                <input type="email" id="acc-email" placeholder="name@example.com" autocomplete="off">
+            </label>
+            <label>App-Passwort
+                <input type="password" id="acc-pass" placeholder="App-spezifisches Passwort" autocomplete="off">
+            </label>
+        </div>
+        <small style="color:var(--muted-color,#888)">
+            <strong>Wichtig:</strong> nicht dein normales Passwort, sondern ein <em>App-Passwort</em>:
+            Gmail → Konto → Sicherheit → App-Passwörter (2FA nötig);
+            Yahoo → Kontosicherheit → App-Passwort generieren;
+            T-Online → Kundencenter → „Passwort für E-Mail-Programme" + IMAP freischalten.
+            Wird verschlüsselt gespeichert; Verbindung wird beim Hinzufügen geprüft.
+        </small>
+        <button id="acc-add-btn" onclick="addAccount()" style="margin-top:0.5rem">Konto prüfen &amp; hinzufügen</button>
+        <div id="acc-error" class="error-message" style="display:none;margin-top:0.5rem"></div>
+    </details>
+
+    <hr>
+
+    <!-- ── Digest ─────────────────────────────────────────── -->
+    <div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap">
+        <label style="margin:0">Zeitraum
+            <select id="digest-days">
+                <option value="7" selected>Letzte 7 Tage</option>
+                <option value="3">Letzte 3 Tage</option>
+                <option value="14">Letzte 14 Tage</option>
+            </select>
+        </label>
+        <button id="digest-btn" onclick="runDigest()" style="margin:0">Wichtige E-Mails der Woche</button>
+    </div>
+
+    <div id="digest-status" style="display:none;margin-top:1rem"></div>
+    <div id="digest-results" style="margin-top:1rem"></div>
+    {% endif %}
+</article>
+
+<script>
+function esc(t){const d=document.createElement('div');d.textContent=t==null?'':t;return d.innerHTML;}
+function fmtDate(iso){ if(!iso) return ''; try{ const d=new Date(iso); return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(e){return iso.slice(0,16).replace('T',' ');} }
+
+async function addAccount() {
+    const btn = document.getElementById('acc-add-btn');
+    const err = document.getElementById('acc-error');
+    err.style.display = 'none';
+    const provider = document.getElementById('acc-provider').value;
+    const email_address = document.getElementById('acc-email').value.trim();
+    const password = document.getElementById('acc-pass').value;
+    if (!email_address || !password) { err.textContent='E-Mail und App-Passwort nötig.'; err.style.display='block'; return; }
+    btn.disabled = true; btn.setAttribute('aria-busy','true'); btn.textContent='Prüfe Verbindung…';
+    try {
+        const resp = await fetch('/api/email/accounts', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ provider, email_address, password }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || ('Fehler '+resp.status));
+        window.location.reload();
+    } catch(e) {
+        err.textContent = e.message; err.style.display='block';
+        btn.disabled=false; btn.removeAttribute('aria-busy'); btn.textContent='Konto prüfen & hinzufügen';
+    }
+}
+
+async function deleteAccount(id, btn) {
+    if (!confirm('Konto entfernen?')) return;
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/email/accounts/'+id, { method:'DELETE' });
+        if (resp.ok) { const row = btn.closest('tr'); if (row) row.remove(); }
+    } catch(e) { btn.disabled=false; }
+}
+
+function renderMail(m) {
+    const folderBadge = m.folder === 'spam'
+        ? '<span class="tag" style="background:#e53935;color:#fff;font-size:0.7em">Spam</span>' : '';
+    return `
+    <details class="mail-item" data-acct="${esc(m.account_id)}" data-folder="${esc(m.folder)}" data-uid="${esc(m.uid)}"
+             style="border-bottom:1px solid var(--muted-border-color,#eee);padding:0.5rem 0">
+        <summary style="cursor:pointer">
+            <div style="display:flex;justify-content:space-between;gap:0.5rem">
+                <strong>${esc(m.subject)}</strong>
+                <small style="color:var(--muted-color,#888);white-space:nowrap">${esc(fmtDate(m.date))}</small>
+            </div>
+            <div style="font-size:0.85rem;color:var(--muted-color,#888)">
+                ${esc(m.from_name || m.from_email)} &lt;${esc(m.from_email)}&gt; · ${esc(m.account)} ${folderBadge}
+            </div>
+            ${m.reason ? `<div style="font-size:0.82rem;margin-top:0.2rem"><em>${esc(m.reason)}</em> · Wichtigkeit ${m.importance}</div>` : ''}
+        </summary>
+        <div class="mail-body" style="margin-top:0.5rem;white-space:pre-wrap;font-size:0.9rem;line-height:1.4;max-height:26rem;overflow:auto;background:rgba(128,128,128,0.06);padding:0.7rem;border-radius:0.3rem">
+            <span style="color:var(--muted-color,#888)">Zum Laden aufklappen…</span>
+        </div>
+    </details>`;
+}
+
+function fmtSize(b) {
+    if (!b) return '?';
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b / 1024).toFixed(0) + ' KB';
+    return (b / 1048576).toFixed(1) + ' MB';
+}
+
+async function loadMailBody(d) {
+    d.dataset.loaded = '1';
+    const bodyEl = d.querySelector('.mail-body');
+    bodyEl.innerHTML = '<span aria-busy="true">Lade Nachricht…</span>';
+    const base = { account_id: d.dataset.acct, folder: d.dataset.folder, uid: d.dataset.uid };
+    try {
+        const resp = await fetch('/api/email/message?' + new URLSearchParams(base).toString());
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || ('Fehler ' + resp.status));
+
+        bodyEl.innerHTML = '';
+        const text = document.createElement('div');
+        text.style.whiteSpace = 'pre-wrap';
+        text.textContent = data.body || '(kein Inhalt)';   // textContent = XSS-safe
+        bodyEl.appendChild(text);
+
+        const atts = data.attachments || [];
+        if (atts.length) {
+            const wrap = document.createElement('div');
+            wrap.style.marginTop = '0.7rem';
+            wrap.style.paddingTop = '0.5rem';
+            wrap.style.borderTop = '1px solid var(--muted-border-color,#ddd)';
+            wrap.innerHTML = `<strong style="font-size:0.85rem">📎 Anhänge (${atts.length})</strong>`;
+            atts.forEach(att => {
+                const qs = new URLSearchParams({ ...base, idx: att.index });
+                const a = document.createElement('a');
+                a.href = '/api/email/attachment?' + qs.toString();
+                a.setAttribute('download', att.filename);
+                a.textContent = `${att.filename} (${fmtSize(att.size)})`;
+                a.style.cssText = 'display:block;font-size:0.85rem;margin-top:0.25rem';
+                wrap.appendChild(a);
+            });
+            bodyEl.appendChild(wrap);
+        }
+
+        // ── Reply ──────────────────────────────────────────────
+        const replyWrap = document.createElement('div');
+        replyWrap.style.cssText = 'margin-top:0.7rem;padding-top:0.5rem;border-top:1px solid var(--muted-border-color,#ddd)';
+        const replyBtn = document.createElement('button');
+        replyBtn.className = 'outline';
+        replyBtn.style.cssText = 'margin:0;padding:0.3rem 0.9rem;font-size:0.85rem';
+        replyBtn.textContent = '↩ Antworten';
+        const form = document.createElement('div');
+        form.style.cssText = 'display:none;margin-top:0.6rem';
+        const reSubject = (data.subject || '').replace(/^\s*(re:\s*)+/i, '');
+        form.innerHTML = `
+            <label style="margin:0 0 0.3rem">An
+                <input type="email" class="re-to" value="${esc(data.reply_to || data.from_email || '')}" style="margin:0">
+            </label>
+            <label style="margin:0 0 0.3rem">Betreff
+                <input type="text" class="re-subj" value="Re: ${esc(reSubject)}" style="margin:0">
+            </label>
+            <textarea class="re-body" rows="6" placeholder="Deine Antwort…" style="margin:0"></textarea>
+            <div style="display:flex;align-items:center;gap:0.6rem;margin-top:0.4rem">
+                <button class="re-send" style="margin:0">Senden</button>
+                <span class="re-status" style="font-size:0.85rem"></span>
+            </div>`;
+        replyBtn.onclick = () => {
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+            if (form.style.display === 'block') form.querySelector('.re-body').focus();
+        };
+        replyWrap.appendChild(replyBtn);
+        replyWrap.appendChild(form);
+        bodyEl.appendChild(replyWrap);
+
+        form.querySelector('.re-send').onclick = async (ev) => {
+            const sbtn = ev.target;
+            const st = form.querySelector('.re-status');
+            const to = form.querySelector('.re-to').value.trim();
+            const subject = form.querySelector('.re-subj').value.trim();
+            const rbody = form.querySelector('.re-body').value;
+            if (!to || !rbody.trim()) { st.textContent = 'Empfänger und Text nötig.'; st.style.color = '#d32f2f'; return; }
+            sbtn.disabled = true; sbtn.setAttribute('aria-busy', 'true'); st.textContent = '';
+            try {
+                const r = await fetch('/api/email/reply', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_id: base.account_id, to, subject, body: rbody,
+                        in_reply_to: data.message_id, references: data.message_id,
+                    }),
+                });
+                const jd = await r.json();
+                if (!r.ok) throw new Error(jd.error || ('Fehler ' + r.status));
+                st.textContent = '✓ Gesendet'; st.style.color = '#2e7d32';
+                form.querySelector('.re-body').value = '';
+                setTimeout(() => { form.style.display = 'none'; }, 1500);
+            } catch (e) {
+                st.textContent = e.message; st.style.color = '#d32f2f';
+            } finally {
+                sbtn.disabled = false; sbtn.removeAttribute('aria-busy');
+            }
+        };
+    } catch (e) {
+        d.dataset.loaded = '';   // allow retry on next open
+        bodyEl.innerHTML = '<span class="error-text">' + esc(e.message) + '</span>';
+    }
+}
+
+function wireMailToggles(container) {
+    container.querySelectorAll('details.mail-item').forEach(d => {
+        d.addEventListener('toggle', () => {
+            if (d.open && !d.dataset.loaded) loadMailBody(d);
+        });
+    });
+}
+
+async function runDigest() {
+    const btn = document.getElementById('digest-btn');
+    const status = document.getElementById('digest-status');
+    const out = document.getElementById('digest-results');
+    const days = document.getElementById('digest-days').value;
+    btn.disabled = true; btn.setAttribute('aria-busy','true'); btn.textContent='Hole & analysiere E-Mails…';
+    status.style.display='block'; status.className='';
+    status.innerHTML='<span aria-busy="true">Hole E-Mails und analysiere sie mit der KI… (kann ~30–60 s dauern)</span>';
+    out.innerHTML='';
+    try {
+        const resp = await fetch('/api/email/digest?days='+encodeURIComponent(days)+'&lang=de');
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || ('Fehler '+resp.status));
+
+        const c = data.counts || {};
+        status.textContent = `Geprüft: ${c.fetched||0} E-Mails aus ${c.accounts||0} Konto(en) `
+            + `(${c.filtered_bulk||0} Newsletter automatisch aussortiert, ${c.analysed||0} per KI analysiert). `
+            + `Wichtig: ${c.important||0} · Aus Spam gerettet: ${c.rescued||0}.`;
+
+        let html = '';
+        if ((data.rescued_from_spam||[]).length) {
+            html += '<h4 style="color:#e53935;margin-top:1rem">⚠ Wichtig, aber im Spam gelandet</h4>';
+            html += data.rescued_from_spam.map(renderMail).join('');
+        }
+        html += '<h4 style="margin-top:1rem">Wichtige E-Mails (Posteingang)</h4>';
+        html += (data.important||[]).length
+            ? data.important.map(renderMail).join('')
+            : '<p><small>Keine als wichtig eingestuften E-Mails in diesem Zeitraum.</small></p>';
+
+        if ((data.errors||[]).length) {
+            html += '<div class="error-message" style="margin-top:1rem"><small>Hinweise: '
+                + data.errors.map(esc).join('<br>') + '</small></div>';
+        }
+        out.innerHTML = html;
+        wireMailToggles(out);   // enable click-to-load body
+    } catch(e) {
+        status.className='error-message'; status.textContent = e.message;
+    } finally {
+        btn.disabled=false; btn.removeAttribute('aria-busy'); btn.textContent='Wichtige E-Mails der Woche';
+    }
+}
+</script>
+
+{% endblock %}

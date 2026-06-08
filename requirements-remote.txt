@@ -24,3 +24,20 @@ opentelemetry-exporter-otlp-proto-http>=1.39.0
 opentelemetry-instrumentation-fastapi>=0.60b1
 opentelemetry-instrumentation-httpx>=0.60b1
 traceloop-sdk>=0.34.0
+
+# Document Checker
+python-docx>=1.1.0
+pypdf>=4.0.0
+fpdf2>=2.7.0
+
+# Email digest (IMAP fetch + encrypted credential storage)
+imap-tools>=1.7.0
+cryptography>=42.0.0
+
+# Notes & Manuals semantic search (cosine over stored embeddings)
+numpy>=1.26.0
+
+# OCR fallback for scanned PDFs (needs tesseract-ocr + poppler-utils system pkgs)
+pytesseract>=0.3.10
+pdf2image>=1.17.0
+Pillow>=10.0.0

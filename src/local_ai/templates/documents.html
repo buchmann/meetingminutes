@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Document Checker — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Document Checker</h2>
+        <small>
+            Upload a Word, PDF, or plain-text document. We extract the text, run it through the LLM
+            {% if has_style_profile %}in <strong>your writing style</strong>{% else %}(no style profile yet — add one in <a href="/settings">Settings</a>){% endif %},
+            and give you back an improved Word, PDF, or text file.
+        </small>
+    </header>
+
+    <form id="doc-form" enctype="multipart/form-data">
+        <label>
+            Document
+            <input id="doc-file" type="file" name="file" required
+                   accept=".docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            <small>Accepted: .docx, .pdf, .txt, .md — up to 25 MB</small>
+        </label>
+
+        <div class="grid">
+            <label>
+                Output Format
+                <select name="output_format" id="doc-output">
+                    <option value="docx" selected>Word (.docx)</option>
+                    <option value="pdf">PDF (.pdf)</option>
+                    <option value="md">Markdown (.md)</option>
+                    <option value="txt">Plain Text (.txt)</option>
+                </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;margin-top:1.6rem">
+                <input id="doc-apply-style" type="checkbox" name="apply_style" value="true"
+                       {% if has_style_profile %}checked{% else %}disabled{% endif %}>
+                Apply my writing style
+                {% if not has_style_profile %}
+                <small style="color:var(--muted-color,#888)">(no profile yet)</small>
+                {% endif %}
+            </label>
+        </div>
+
+        <div class="halluci" data-default="0.3" style="margin:0.8rem 0;padding:0.6rem 0.8rem;border:1px solid var(--muted-border-color,#ccc);border-radius:0.4rem">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
+                <label style="margin:0">Halluzination / Kreativität: <strong class="halluci-value">0.30</strong></label>
+                <button type="button" class="halluci-reset outline secondary" style="margin:0;padding:0.2rem 0.7rem;font-size:0.8rem">Reset auf Standard</button>
+            </div>
+            <input type="range" class="halluci-slider" min="0" max="1" step="0.05" style="width:100%;margin:0.4rem 0 0">
+            <small style="color:var(--muted-color,#888)">Niedrig = faktentreu (weniger Halluzination) · Hoch = kreativer. Standard: 0.30</small>
+        </div>
+
+        <button id="doc-btn" type="submit">Improve & Download</button>
+    </form>
+
+    <div id="doc-status" class="error-message" style="display:none;margin-top:1rem"></div>
+    <div id="doc-meta" style="display:none;margin-top:1rem">
+        <p>
+            <strong>Done.</strong>
+            <span id="doc-meta-text"></span>
+        </p>
+        <small id="doc-meta-warning" class="error-text" style="display:none"></small>
+    </div>
+</article>
+
+<script>
+const form = document.getElementById('doc-form');
+const btn = document.getElementById('doc-btn');
+const statusBox = document.getElementById('doc-status');
+const metaBox = document.getElementById('doc-meta');
+const metaText = document.getElementById('doc-meta-text');
+const metaWarn = document.getElementById('doc-meta-warning');
+
+form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    statusBox.style.display = 'none';
+    metaBox.style.display = 'none';
+    metaWarn.style.display = 'none';
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.textContent = 'Improving (this can take a minute)...';
+
+    const fd = new FormData(form);
+    // Checkboxes don't post 'false' when unchecked — explicitly include the value.
+    if (!fd.get('apply_style')) fd.set('apply_style', 'false');
+    fd.set('temperature', window.halluciValue());
+
+    try {
+        const resp = await fetch('/api/documents/check', { method: 'POST', body: fd });
+        if (!resp.ok) {
+            let msg = 'Server error (' + resp.status + ')';
+            try { const j = await resp.json(); msg = j.detail || msg; } catch (_e) {}
+            throw new Error(msg);
+        }
+
+        // Pull metadata from response headers
+        const lang = resp.headers.get('X-Doc-Language') || '';
+        const chunks = resp.headers.get('X-Doc-Chunks') || '1';
+        const origChars = resp.headers.get('X-Doc-Original-Chars') || '?';
+        const newChars = resp.headers.get('X-Doc-Improved-Chars') || '?';
+        const styleApplied = resp.headers.get('X-Doc-Style-Applied') === '1';
+        const warning = resp.headers.get('X-Doc-Warning');
+
+        // Extract filename from Content-Disposition (best-effort)
+        let filename = 'improved-document';
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^"]+)"?/i);
+        if (m) filename = m[1];
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        metaText.textContent =
+            `Language: ${lang || 'auto'} · Chunks: ${chunks} · ${origChars} → ${newChars} chars`
+            + (styleApplied ? ' · style applied' : '');
+        if (warning) {
+            metaWarn.textContent = 'Warning: ' + warning;
+            metaWarn.style.display = 'block';
+        }
+        metaBox.style.display = 'block';
+
+    } catch (err) {
+        statusBox.textContent = err.message;
+        statusBox.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = 'Improve & Download';
+    }
+});
+</script>
+
+{% endblock %}

@@ -1,6 +1,6 @@
 # Build & Deployment
 
-How Transkriptor is built into a container image and deployed to the Kubernetes
+How local-ai is built into a container image and deployed to the Kubernetes
 cluster. This is the "remote-backend" deployment: all heavy ML work (WhisperX
 transcription, vLLM summarization) runs on the DGX Spark, and the container only
 runs the FastAPI web app.
@@ -11,22 +11,22 @@ runs the FastAPI web app.
 
 ```
   Mac (source of truth)                linux  (build server)            k8s cluster (master 192.168.178.35)
-  /Users/manfred/claude/Code/   rsync   /home/manfred/transkriptor-build  ns: transkriptor
-      transkriptor-app          ─────►   docker build (amd64)             Deployment → Pod (worker-node1)
-                                          docker push  ──► Docker Hub ──►  image pull: mbx1010/transkriptor:latest
-                                                          (mbx1010)        Ingress: transkriptor.lab.allwaysbeginner.com
+  /Users/manfred/claude/Code/   rsync   /home/manfred/local-ai-build  ns: local-ai
+      local-ai-app          ─────►   docker build (amd64)             Deployment → Pod (worker-node1)
+                                          docker push  ──► Docker Hub ──►  image pull: mbx1010/local-ai:latest
+                                                          (mbx1010)        Ingress: local-ai.lab.allwaysbeginner.com
                                                                             └─► DGX Spark 192.168.178.190 (whisperx/vLLM/Instana)
 ```
 
 | Component | Value |
 |-----------|-------|
 | Build server | `linux` (`linux.lab.allwaysbeginner.com`), user `manfred`, Docker 29.2.1 |
-| Build checkout | `/home/manfred/transkriptor-build` |
-| Image | `docker.io/mbx1010/transkriptor` — tags `latest`, `multiuser` |
+| Build checkout | `/home/manfred/local-ai-build` |
+| Image | `docker.io/mbx1010/local-ai` — tags `latest`, `multiuser` |
 | Cluster API | `https://192.168.178.35:6443` (nodes: `master-node`, `worker-node1`, `worker-node2`) |
-| Namespace | `transkriptor` |
-| Storage | PVC `transkriptor-data` (20Gi, `local-path`) mounted at `/app/data` |
-| Ingress | nginx, host `transkriptor.lab.allwaysbeginner.com`, **HTTPS** (cert-manager `selfsigned-issuer`, ssl-redirect) |
+| Namespace | `local-ai` |
+| Storage | PVC `local-ai-data` (20Gi, `local-path`) mounted at `/app/data` |
+| Ingress | nginx, host `local-ai.lab.allwaysbeginner.com`, **HTTPS** (cert-manager `selfsigned-issuer`, ssl-redirect) |
 | Backends (DGX) | whisperx `:8003`, vLLM `:8001`, gpu-manager `:9090`, Instana OTLP `:4328` |
 
 > **Why build on `linux`?** The cluster nodes are `amd64`; the Mac is `arm64`.
@@ -40,7 +40,7 @@ runs the FastAPI web app.
 **On the `linux` build server (one-time):**
 - Docker installed and running.
 - Logged in to Docker Hub as the image owner: `docker login` (account `mbx1010`).
-- A checkout/working copy at `/home/manfred/transkriptor-build`.
+- A checkout/working copy at `/home/manfred/local-ai-build`.
 
 **For deploying:**
 - `kubectl` with a valid kubeconfig for `192.168.178.35` (context `kubernetes-admin@kubernetes`), **or** another admin path to the cluster.
@@ -51,7 +51,7 @@ runs the FastAPI web app.
 
 The Dockerfile installs only the slim **remote** dependency set
 (`requirements-remote.txt` — no torch/whisper/pyannote), installs the app, and
-runs `python -m transkriptor`. No code changes are needed between builds beyond
+runs `python -m local-ai`. No code changes are needed between builds beyond
 syncing the source.
 
 ```bash
@@ -61,14 +61,14 @@ rsync -az \
   --exclude 'data/' --exclude 'data.backup-*/' --exclude 'backups/' \
   --exclude '.git/' --exclude '.env' --exclude '__pycache__/' \
   --exclude '*.egg-info/' --exclude '*.m4a' --exclude '.venv/' \
-  /Users/manfred/claude/Code/transkriptor-app/  linux:/home/manfred/transkriptor-build/
+  /Users/manfred/claude/Code/local-ai-app/  linux:/home/manfred/local-ai-build/
 
 # On the build server: build (amd64) and push
 ssh linux '
-  cd ~/transkriptor-build &&
-  docker build -t mbx1010/transkriptor:latest -t mbx1010/transkriptor:multiuser . &&
-  docker push mbx1010/transkriptor:latest &&
-  docker push mbx1010/transkriptor:multiuser
+  cd ~/local-ai-build &&
+  docker build -t mbx1010/local-ai:latest -t mbx1010/local-ai:multiuser . &&
+  docker push mbx1010/local-ai:latest &&
+  docker push mbx1010/local-ai:multiuser
 '
 ```
 
@@ -85,29 +85,29 @@ application code.
 
 | File | Resource | Purpose |
 |------|----------|---------|
-| `namespace.yaml` | Namespace `transkriptor` | Isolation |
-| `pvc.yaml` | PVC `transkriptor-data` (20Gi `local-path`) | Persists SQLite DB + uploads/outputs at `/app/data` |
-| `configmap.yaml` | ConfigMap `transkriptor-config` | All non-secret env (backends, OTel, session settings) |
+| `namespace.yaml` | Namespace `local-ai` | Isolation |
+| `pvc.yaml` | PVC `local-ai-data` (20Gi `local-path`) | Persists SQLite DB + uploads/outputs at `/app/data` |
+| `configmap.yaml` | ConfigMap `local-ai-config` | All non-secret env (backends, OTel, session settings) |
 | `secret.example.yaml` | Secret template | **Real secret applied out-of-band** (admin password) |
-| `deployment.yaml` | Deployment `transkriptor` | 1 replica, mounts ConfigMap + Secret via `envFrom`, PVC at `/app/data`, liveness `/api/livez`, readiness `/api/readyz` |
+| `deployment.yaml` | Deployment `local-ai` | 1 replica, mounts ConfigMap + Secret via `envFrom`, PVC at `/app/data`, liveness `/api/livez`, readiness `/api/readyz` |
 | `service.yaml` | Service (ClusterIP) | `:80 → :8000` |
-| `ingress.yaml` | Ingress (nginx) | `transkriptor.lab.allwaysbeginner.com → service:80`, 2 GB body limit, long timeouts for large uploads |
+| `ingress.yaml` | Ingress (nginx) | `local-ai.lab.allwaysbeginner.com → service:80`, 2 GB body limit, long timeouts for large uploads |
 
 ### Multi-user configuration
 
 Authentication is configured via env (see the [Multi-user section of the README](../README.md#multi-user--authentication)):
 
-- **Secret `transkriptor-secrets`** holds the admin password (never committed):
+- **Secret `local-ai-secrets`** holds the admin password (never committed):
   ```bash
-  kubectl -n transkriptor create secret generic transkriptor-secrets \
-    --from-literal=TRANSKRIPTOR_ADMIN_PASSWORD='<strong-password>' \
+  kubectl -n local-ai create secret generic local-ai-secrets \
+    --from-literal=LOCAL_AI_ADMIN_PASSWORD='<strong-password>' \
     --dry-run=client -o yaml | kubectl apply -f -
   ```
 - **ConfigMap** adds (non-secret) auth settings:
   ```yaml
-  TRANSKRIPTOR_ADMIN_USERNAME: "admin"
-  TRANSKRIPTOR_SESSION_TTL_HOURS: "720"
-  TRANSKRIPTOR_SESSION_COOKIE_SECURE: "true"    # ingress serves HTTPS
+  LOCAL_AI_ADMIN_USERNAME: "admin"
+  LOCAL_AI_SESSION_TTL_HOURS: "720"
+  LOCAL_AI_SESSION_COOKIE_SECURE: "true"    # ingress serves HTTPS
   ```
 
 ### TLS
@@ -115,14 +115,14 @@ Authentication is configured via env (see the [Multi-user section of the README]
 The ingress terminates TLS via **cert-manager**. The lab domain resolves to a
 private IP, so Let's Encrypt HTTP-01 cannot validate it — the ingress therefore
 uses the **`selfsigned-issuer`** ClusterIssuer (`cert-manager.io/cluster-issuer:
-selfsigned-issuer` annotation + a `tls:` block writing to the `transkriptor-tls`
+selfsigned-issuer` annotation + a `tls:` block writing to the `local-ai-tls`
 secret). This provides a valid HTTPS **secure context** (required for the
 browser microphone/`getUserMedia` and the clipboard API), at the cost of a
 one-time browser trust prompt. `ssl-redirect` forces HTTP → HTTPS.
 
 To switch to a browser-trusted cert, use `letsencrypt-prod` with a **DNS-01**
 solver (the domain isn't internet-reachable for HTTP-01) or install a wildcard
-cert for `*.lab.allwaysbeginner.com` as the `transkriptor-tls` secret.
+cert for `*.lab.allwaysbeginner.com` as the `local-ai-tls` secret.
 
 ### Recording
 
@@ -134,11 +134,11 @@ deployed UI.
 - **Deployment** consumes both:
   ```yaml
   envFrom:
-    - configMapRef: { name: transkriptor-config }
-    - secretRef:    { name: transkriptor-secrets }
+    - configMapRef: { name: local-ai-config }
+    - secretRef:    { name: local-ai-secrets }
   ```
 
-> Set `TRANSKRIPTOR_SESSION_COOKIE_SECURE: "true"` if/when the ingress is moved
+> Set `LOCAL_AI_SESSION_COOKIE_SECURE: "true"` if/when the ingress is moved
 > behind TLS, otherwise the session cookie won't be sent and login will fail.
 
 ---
@@ -159,8 +159,8 @@ kubectl apply -f k8s/deployment.yaml
 ### Update to a new image build
 ```bash
 # After build+push (step 1):
-kubectl -n transkriptor rollout restart deployment/transkriptor
-kubectl -n transkriptor rollout status  deployment/transkriptor
+kubectl -n local-ai rollout restart deployment/local-ai
+kubectl -n local-ai rollout status  deployment/local-ai
 ```
 (If you only changed manifests, `kubectl apply -f k8s/<file>.yaml`; changing the
 ConfigMap/Secret does **not** auto-restart pods — follow with a rollout restart.)
@@ -171,8 +171,8 @@ the app:
 1. Adds `user_id` / `visibility` columns + indexes to the `jobs` table.
 2. **Deletes legacy (owner-less) jobs** and prunes their upload/output dirs
    (clean multi-user start — back up the PVC first if you need the old data).
-3. **Seeds the admin** account from `TRANSKRIPTOR_ADMIN_USERNAME` /
-   `TRANSKRIPTOR_ADMIN_PASSWORD` (only when no users exist yet).
+3. **Seeds the admin** account from `LOCAL_AI_ADMIN_USERNAME` /
+   `LOCAL_AI_ADMIN_PASSWORD` (only when no users exist yet).
 
 Confirm in the logs:
 ```
@@ -186,10 +186,10 @@ Application startup complete.
 ## 4. Verify
 
 ```bash
-kubectl -n transkriptor get pods,svc,ingress
-kubectl -n transkriptor logs deploy/transkriptor --tail=30
+kubectl -n local-ai get pods,svc,ingress
+kubectl -n local-ai logs deploy/local-ai --tail=30
 
-B=http://transkriptor.lab.allwaysbeginner.com
+B=http://local-ai.lab.allwaysbeginner.com
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $B/        # 303 -> /login
 curl -s -o /dev/null -w '%{http_code}\n' $B/login                  # 200
 curl -s -o /dev/null -w '%{http_code}\n' $B/api/jobs               # 401 (unauth)
@@ -205,12 +205,12 @@ Liveness/readiness probes are at `/api/livez` and `/api/readyz` (no auth).
 
 | Task | Command |
 |------|---------|
-| Tail logs | `kubectl -n transkriptor logs deploy/transkriptor -f` |
-| Restart (re-pull `:latest`) | `kubectl -n transkriptor rollout restart deploy/transkriptor` |
-| Roll back | `kubectl -n transkriptor rollout undo deploy/transkriptor` (or set image to a known tag, e.g. `:multiuser`) |
+| Tail logs | `kubectl -n local-ai logs deploy/local-ai -f` |
+| Restart (re-pull `:latest`) | `kubectl -n local-ai rollout restart deploy/local-ai` |
+| Roll back | `kubectl -n local-ai rollout undo deploy/local-ai` (or set image to a known tag, e.g. `:multiuser`) |
 | Change admin password | re-create the Secret (above) **and** reset in-app at `/admin/users`; restart to re-read the Secret if relying on the seed |
 | Add/remove users | in-app at `/admin/users` (admin only) — no manifest change |
-| Inspect the DB | `kubectl -n transkriptor exec deploy/transkriptor -- python -c "import sqlite3;print(sqlite3.connect('/app/data/transkriptor.db').execute('select count(*) from jobs').fetchone())"` |
+| Inspect the DB | `kubectl -n local-ai exec deploy/local-ai -- python -c "import sqlite3;print(sqlite3.connect('/app/data/local-ai.db').execute('select count(*) from jobs').fetchone())"` |
 | Scale | keep `replicas: 1` — the SQLite DB on a `ReadWriteOnce` PVC is single-writer; do not scale out without switching to a shared DB |
 
 ---
@@ -221,7 +221,7 @@ Liveness/readiness probes are at `/api/livez` and `/api/readyz` (no auth).
   replica would corrupt data and split sessions. For HA, move to Postgres + a
   shared session store first.
 - **Secrets are not committed.** `k8s/secret.example.yaml` is a template; the
-  real `transkriptor-secrets` is applied out-of-band.
+  real `local-ai-secrets` is applied out-of-band.
 - **Build server kubectl.** At time of writing, `linux`'s kubeconfig token for
   the cluster is expired — the last rollout was applied from an admin kubeconfig
   on `192.168.178.35`. Refresh `linux`'s kubeconfig if you want to build *and*

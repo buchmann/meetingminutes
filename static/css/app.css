@@ -454,3 +454,69 @@ details summary .ts {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* ── Unified top navigation: dropdowns and standalone links share one
+   flat, consistent text style (no heavy bordered-button look on the
+   dropdown summaries). ───────────────────────────────────────────────── */
+.nav-menu {
+    align-items: center;
+    gap: 0.1rem;
+}
+.nav-menu > li {
+    padding: 0;
+}
+
+/* Common treatment for every top-level item — dropdown summaries AND links */
+.nav-menu > li > a.secondary,
+.nav-menu .dropdown > summary {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.875rem;
+    line-height: 1.2;
+    font-weight: 500;
+    color: var(--pico-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    text-decoration: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+.nav-menu > li > a.secondary > small,
+.nav-menu .dropdown > summary > small {
+    font-size: inherit;
+}
+
+/* Strip Pico's select/button chrome from the dropdown summaries */
+.nav-menu .dropdown > summary {
+    cursor: pointer;
+}
+.nav-menu .dropdown > summary::after {
+    /* keep Pico's caret, just give it consistent spacing */
+    margin-inline-start: 0.35rem;
+    opacity: 0.55;
+}
+
+/* Shared hover / active states */
+.nav-menu > li > a.secondary:hover,
+.nav-menu .dropdown > summary:hover,
+.nav-menu .dropdown[open] > summary {
+    background: var(--pico-secondary-background, rgba(115, 130, 140, 0.12));
+    color: var(--pico-secondary-hover, var(--pico-secondary));
+    border-color: transparent;
+}
+
+/* Logout keeps a light outline so the sign-out action stays distinct,
+   but matches the size/radius of the rest of the bar. */
+.nav-menu form button.secondary.outline {
+    padding: 0.4rem 0.8rem !important;
+    font-size: 0.875rem !important;
+    border-radius: 0.5rem;
+    font-weight: 500;
+}
+
+/* Username label aligned with the row */
+.nav-menu > li > small {
+    padding: 0 0.4rem;
+}

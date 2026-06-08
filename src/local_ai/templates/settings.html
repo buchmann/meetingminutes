@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}local-ai - Settings{% endblock %}
+{% block content %}
+
+<a href="/">&larr; Back to Home</a>
+
+<article>
+    <header>
+        <h2>Profil / Rollen</h2>
+        <small>Schaltet rollenspezifische Funktionen im Bereich <strong>PA</strong> frei.</small>
+    </header>
+    <label style="display:flex;align-items:center;gap:0.5rem">
+        <input type="checkbox" id="role-vermieter" {% if user.profile and 'vermieter' in user.profile %}checked{% endif %}>
+        <span><strong>Vermieter / Mietverwaltung</strong> — schaltet das Modul „Immobilien" frei (Abrechnungs-Check, Nebenkostenabrechnung).</span>
+    </label>
+    <button id="role-save-btn" onclick="saveRoles()" style="margin-top:0.5rem">Rollen speichern</button>
+    <span id="role-status" style="margin-left:0.6rem;font-size:0.9rem"></span>
+    <script>
+    async function saveRoles(){
+        const roles=[];
+        if(document.getElementById('role-vermieter').checked) roles.push('vermieter');
+        const st=document.getElementById('role-status');
+        const r=await fetch('/api/profile/role',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roles})});
+        if(r.ok){ st.textContent='✓ Gespeichert — Menü aktualisiert sich beim Neuladen.'; st.style.color='#2e7d32';
+            setTimeout(()=>location.reload(),900); }
+        else { st.textContent='Fehler'; st.style.color='#d32f2f'; }
+    }
+    </script>
+</article>
+
+<article>
+    <header>
+        <h2>Writing Style Profile</h2>
+        <p>Summaries will be written in your personal style. Analyze your writing to create a profile, or write one manually.</p>
+    </header>
+
+    <div id="style-status">
+        {% if profile %}
+        <div class="style-active">
+            <strong>Active profile:</strong>
+            <blockquote id="current-profile">{{ profile }}</blockquote>
+        </div>
+        {% else %}
+        <div class="style-inactive">
+            <p><em>No style profile set. Summaries use the default style.</em></p>
+        </div>
+        {% endif %}
+    </div>
+
+    <h4>Option 1: Paste Writing Samples</h4>
+    <p>Paste 3-5 examples of text you've written (emails, reports, notes, Slack messages).</p>
+    <div id="samples-container">
+        <label>
+            Sample 1
+            <textarea class="style-sample" rows="4" placeholder="Paste an email, message, or note you wrote..."></textarea>
+        </label>
+        <label>
+            Sample 2
+            <textarea class="style-sample" rows="4" placeholder="Another writing sample..."></textarea>
+        </label>
+        <label>
+            Sample 3
+            <textarea class="style-sample" rows="4" placeholder="One more sample..."></textarea>
+        </label>
+    </div>
+    <div class="grid">
+        <button class="outline" onclick="addSampleField()">+ Add Sample</button>
+        <button id="analyze-samples-btn" onclick="analyzeSamples()">Analyze Samples</button>
+    </div>
+    <div id="sample-error" class="error-message" style="display:none"></div>
+
+    <hr>
+
+    <h4>Option 2: Write or Edit Profile Manually</h4>
+    <p>Describe your writing style directly, or edit the generated profile above.</p>
+    <label>
+        Style Profile
+        <textarea id="manual-profile" rows="6" placeholder="Write in the following style: Direct and technical tone. Use short sentences...">{{ profile or '' }}</textarea>
+    </label>
+    <div class="grid">
+        <button id="save-profile-btn" onclick="saveProfile()">Save Profile</button>
+        <button class="outline secondary" id="delete-profile-btn" onclick="deleteProfile()" {% if not profile %}disabled{% endif %}>Remove Profile</button>
+    </div>
+    <div id="manual-error" class="error-message" style="display:none"></div>
+</article>
+
+<article>
+    <header>
+        <h3>How It Works</h3>
+    </header>
+    <ol>
+        <li>Provide writing samples (emails, pasted text, or manual description)</li>
+        <li>The AI analyzes your tone, structure, vocabulary, and habits</li>
+        <li>A style profile is saved and injected into every future meeting summary</li>
+        <li>Summaries will read as if you wrote them</li>
+    </ol>
+</article>
+
+<script>
+let sampleCount = 3;
+
+function addSampleField() {
+    sampleCount++;
+    const container = document.getElementById('samples-container');
+    const label = document.createElement('label');
+    label.innerHTML = `Sample ${sampleCount}<textarea class="style-sample" rows="4" placeholder="Another writing sample..."></textarea>`;
+    container.appendChild(label);
+}
+
+async function analyzeSamples() {
+    const btn = document.getElementById('analyze-samples-btn');
+    const errDiv = document.getElementById('sample-error');
+    errDiv.style.display = 'none';
+
+    const textareas = document.querySelectorAll('.style-sample');
+    const samples = Array.from(textareas).map(t => t.value.trim()).filter(s => s.length > 0);
+
+    if (samples.length < 2) {
+        errDiv.textContent = 'Please provide at least 2 writing samples.';
+        errDiv.style.display = 'block';
+        return;
+    }
+
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    btn.textContent = 'Analyzing style...';
+
+    try {
+        const resp = await fetch('/api/style/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ samples }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Failed to analyze samples');
+        }
+        const data = await resp.json();
+        showProfile(data.profile);
+    } catch (e) {
+        errDiv.textContent = e.message;
+        errDiv.style.display = 'block';
+    } finally {
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+        btn.textContent = 'Analyze Samples';
+    }
+}
+
+async function saveProfile() {
+    const btn = document.getElementById('save-profile-btn');
+    const errDiv = document.getElementById('manual-error');
+    const profile = document.getElementById('manual-profile').value.trim();
+    errDiv.style.display = 'none';
+
+    if (!profile) {
+        errDiv.textContent = 'Profile text cannot be empty.';
+        errDiv.style.display = 'block';
+        return;
+    }
+
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+
+    try {
+        const resp = await fetch('/api/style/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Failed to save profile');
+        }
+        showProfile(profile);
+    } catch (e) {
+        errDiv.textContent = e.message;
+        errDiv.style.display = 'block';
+    } finally {
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+    }
+}
+
+async function deleteProfile() {
+    if (!confirm('Remove your writing style profile? Summaries will use the default style.')) return;
+    await fetch('/api/style/profile', { method: 'DELETE' });
+    document.getElementById('style-status').innerHTML = '<div class="style-inactive"><p><em>No style profile set. Summaries use the default style.</em></p></div>';
+    document.getElementById('manual-profile').value = '';
+    document.getElementById('delete-profile-btn').disabled = true;
+}
+
+function showProfile(profile) {
+    document.getElementById('style-status').innerHTML = `<div class="style-active"><strong>Active profile:</strong><blockquote id="current-profile">${profile}</blockquote></div>`;
+    document.getElementById('manual-profile').value = profile;
+    document.getElementById('delete-profile-btn').disabled = false;
+}
+</script>
+
+{% endblock %}

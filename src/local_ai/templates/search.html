@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}Web Search — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Web Search</h2>
+        <small>
+            Werbefreie Suche über das selbst-gehostete SearXNG (keine Ads, kein Tracking).
+            Optional eine KI-Antwort mit Quellenangaben über dein lokales LLM.
+        </small>
+    </header>
+
+    {% if not search_enabled %}
+    <p class="error-message">Web search ist nicht konfiguriert (kein SearXNG-URL gesetzt).</p>
+    {% else %}
+
+    <form id="search-form" onsubmit="return false">
+        <label for="search-query"><strong>Suchbegriff</strong></label>
+        <div style="display:flex;gap:0.5rem;align-items:stretch">
+            <input type="text" id="search-query" name="q" placeholder="Suchbegriff eingeben…"
+                   autocomplete="off" autofocus
+                   style="flex:1 1 auto;min-width:0;margin:0;width:auto">
+            <button id="search-btn" type="submit"
+                    style="flex:0 0 auto;width:auto;white-space:nowrap;margin:0">Suchen</button>
+        </div>
+        <div class="grid" style="margin-top:0.5rem">
+            <label>
+                Suchtyp
+                <select id="search-type" onchange="onSearchTypeChange()">
+                    <option value="web" selected>Web</option>
+                    <option value="images">Bilder</option>
+                    <option value="shopping">Shopping</option>
+                </select>
+            </label>
+            <label id="search-region-label" style="display:none">
+                Markt
+                <select id="search-region">
+                    <option value="de" selected>Deutschland</option>
+                    <option value="eu">Europa</option>
+                    <option value="intl">International</option>
+                </select>
+            </label>
+            <label>
+                Modus
+                <select id="search-mode">
+                    <option value="links" selected>Nur Links</option>
+                    <option value="answer">KI-Antwort mit Quellen</option>
+                </select>
+            </label>
+            <label>
+                Sprache
+                <select id="search-language">
+                    <option value="auto" selected>Auto</option>
+                    <option value="de">Deutsch</option>
+                    <option value="en">English</option>
+                </select>
+            </label>
+            <label>
+                Zeitraum
+                <select id="search-time">
+                    <option value="" selected>Beliebig</option>
+                    <option value="day">Letzter Tag</option>
+                    <option value="week">Letzte Woche</option>
+                    <option value="month">Letzter Monat</option>
+                    <option value="year">Letztes Jahr</option>
+                </select>
+            </label>
+            <label>
+                Treffer
+                <select id="search-count">
+                    <option value="10" selected>10</option>
+                    <option value="15">15</option>
+                    <option value="20">20</option>
+                </select>
+            </label>
+        </div>
+
+        <details style="margin-top:0.3rem">
+            <summary style="cursor:pointer">Suchmaschinen<small style="color:var(--muted-color,#888)"> — leer = alle</small></summary>
+            <div id="search-engines" style="display:flex;flex-wrap:wrap;gap:0.8rem;margin-top:0.5rem">
+                {% for e in engines %}
+                <label style="display:flex;align-items:center;gap:0.3rem;margin:0">
+                    <input type="checkbox" class="engine-cb" value="{{ e }}" style="margin:0">
+                    {{ e[:1]|upper }}{{ e[1:] }}
+                </label>
+                {% endfor %}
+            </div>
+            <small style="color:var(--muted-color,#888)">Keine Auswahl = alle aktivierten Engines (empfohlen). Einzelne Engines können kurzzeitig rate-limitiert sein.</small>
+        </details>
+    </form>
+
+    <div id="search-status" class="error-message" style="display:none;margin-top:1rem"></div>
+
+    <div id="search-answer" style="display:none;margin-top:1rem;padding:0.8rem 1rem;border-left:3px solid #1e88e5;background:rgba(30,136,229,0.07);border-radius:0.3rem">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong>KI-Antwort</strong>
+            <small style="color:var(--muted-color,#888)">aus den Top-Quellen · prüfe die Zitate</small>
+        </div>
+        <div id="search-answer-text" style="margin-top:0.5rem;white-space:pre-wrap"></div>
+    </div>
+
+    <div id="search-results" style="margin-top:1rem"></div>
+    {% endif %}
+</article>
+
+<script>
+const sForm = document.getElementById('search-form');
+const sBtn = document.getElementById('search-btn');
+const sQuery = document.getElementById('search-query');
+const sStatus = document.getElementById('search-status');
+const sResults = document.getElementById('search-results');
+const sAnswer = document.getElementById('search-answer');
+const sAnswerText = document.getElementById('search-answer-text');
+
+function escapeHtml(t) {
+    const d = document.createElement('div');
+    d.textContent = t == null ? '' : t;
+    return d.innerHTML;
+}
+
+function hostOf(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return url; }
+}
+
+// Turn [n] citations into clickable superscripts that scroll to the result.
+function linkifyCitations(text) {
+    return escapeHtml(text).replace(/\[(\d{1,2})\]/g, (m, n) =>
+        `<a href="#res-${n}" class="cite" style="text-decoration:none;font-weight:bold">[${n}]</a>`);
+}
+
+// Adjust the form when the search type changes: images/shopping don't support
+// the AI-answer mode or the engine filter.
+function onSearchTypeChange() {
+    const t = document.getElementById('search-type').value;
+    const modeSel = document.getElementById('search-mode');
+    const engineDetails = document.querySelector('details');
+    const answerOpt = modeSel.querySelector('option[value="answer"]');
+    const regionLabel = document.getElementById('search-region-label');
+    // Market selector only for shopping.
+    if (regionLabel) regionLabel.style.display = (t === 'shopping') ? '' : 'none';
+    if (t === 'web') {
+        answerOpt.disabled = false;
+        modeSel.disabled = false;
+        if (engineDetails) engineDetails.style.display = '';
+        document.getElementById('search-query').placeholder = 'Suchbegriff eingeben…';
+    } else {
+        // Force "Nur Links" and disable AI answer + engine filter.
+        modeSel.value = 'links';
+        answerOpt.disabled = true;
+        modeSel.disabled = true;
+        if (engineDetails) engineDetails.style.display = 'none';
+        document.getElementById('search-query').placeholder =
+            t === 'images' ? 'Bild suchen…' : 'Produkt suchen…';
+    }
+}
+
+function renderImageGrid(results) {
+    return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:0.6rem">'
+        + results.map(r => `
+        <a href="${encodeURI(r.url)}" target="_blank" rel="noopener noreferrer"
+           title="${escapeHtml(r.title)}"
+           style="display:block;border:1px solid var(--muted-border-color,#eee);border-radius:0.4rem;overflow:hidden;text-decoration:none">
+            <div style="aspect-ratio:1/1;background:rgba(128,128,128,0.08);display:flex;align-items:center;justify-content:center;overflow:hidden">
+                <img src="${encodeURI(r.thumbnail || r.img_src)}" loading="lazy" referrerpolicy="no-referrer"
+                     onerror="this.closest('a').style.display='none'"
+                     style="width:100%;height:100%;object-fit:cover">
+            </div>
+            <div style="padding:0.3rem 0.4rem;font-size:0.75rem;line-height:1.2">
+                <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#2e7d32">${escapeHtml(r.source || hostOf(r.url))}</div>
+                ${r.resolution ? `<div style="color:var(--muted-color,#888)">${escapeHtml(r.resolution)}</div>` : ''}
+            </div>
+        </a>`).join('')
+        + '</div>';
+}
+
+function renderLinkList(results) {
+    return results.map((r, i) => {
+        const n = i + 1;
+        return `
+        <div id="res-${n}" class="search-hit" style="padding:0.6rem 0;border-bottom:1px solid var(--muted-border-color,#eee)">
+            <div style="display:flex;gap:0.5rem;align-items:baseline">
+                <span style="color:var(--muted-color,#888);min-width:1.6em">${n}.</span>
+                <div style="flex:1">
+                    <a href="${encodeURI(r.url)}" target="_blank" rel="noopener noreferrer" style="font-weight:bold">${escapeHtml(r.title)}</a>
+                    <div style="color:#2e7d32;font-size:0.82rem;word-break:break-all">${escapeHtml(hostOf(r.url))}${r.engine ? ' · ' + escapeHtml(r.engine) : ''}</div>
+                    ${r.content ? `<div style="font-size:0.9rem;margin-top:0.2rem">${escapeHtml(r.content)}</div>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function runSearch() {
+    const query = sQuery.value.trim();
+    if (!query) return;
+    const search_type = document.getElementById('search-type').value;
+    const shopping_region = document.getElementById('search-region').value;
+    const mode = document.getElementById('search-mode').value;
+    const language = document.getElementById('search-language').value;
+    const count = document.getElementById('search-count').value;
+    const time_range = document.getElementById('search-time').value;
+    const engines = Array.from(document.querySelectorAll('.engine-cb:checked')).map(cb => cb.value);
+
+    sBtn.disabled = true;
+    sBtn.setAttribute('aria-busy', 'true');
+    sBtn.textContent = mode === 'answer' ? 'Suche + Antwort…' : 'Suche…';
+    sStatus.style.display = 'none';
+    sAnswer.style.display = 'none';
+    sResults.innerHTML = '';
+
+    try {
+        const resp = await fetch('/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, mode, search_type, shopping_region, language, count, time_range, engines }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || ('Server error ' + resp.status));
+
+        const results = data.results || [];
+        if (!results.length) {
+            sStatus.textContent = 'Keine Treffer.';
+            sStatus.style.display = 'block';
+            return;
+        }
+
+        sResults.innerHTML = (data.search_type === 'images')
+            ? renderImageGrid(results)
+            : renderLinkList(results);
+
+        // AI answer (web only)
+        if (data.answer) {
+            sAnswerText.innerHTML = linkifyCitations(data.answer);
+            sAnswer.style.display = 'block';
+            sAnswer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        if (data.error) {
+            sStatus.textContent = data.error;
+            sStatus.style.display = 'block';
+        }
+    } catch (e) {
+        sStatus.textContent = e.message;
+        sStatus.style.display = 'block';
+    } finally {
+        sBtn.disabled = false;
+        sBtn.removeAttribute('aria-busy');
+        sBtn.textContent = 'Suchen';
+    }
+}
+
+if (sForm) {
+    sForm.addEventListener('submit', runSearch);
+    sQuery.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } });
+}
+</script>
+
+{% endblock %}

@@ -1,38 +1,43 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: transkriptor-config
-  namespace: transkriptor
+  name: local-ai-config
+  namespace: local-ai
 data:
   # Transcription: remote via DGX Spark whisperx-blackwell
-  TRANSKRIPTOR_TRANSCRIPTION_BACKEND: "remote"
-  TRANSKRIPTOR_WHISPERX_URL: "http://192.168.178.190:8003"
+  LOCAL_AI_TRANSCRIPTION_BACKEND: "remote"
+  LOCAL_AI_WHISPERX_URL: "http://192.168.178.190:8003"
 
   # GPU manager: auto-swaps whisperx ↔ vLLM on Spark (shared GPU memory)
-  TRANSKRIPTOR_GPU_MANAGER_URL: "http://192.168.178.190:9090"
-  TRANSKRIPTOR_VLLM_PROFILE: "auto"
+  LOCAL_AI_GPU_MANAGER_URL: "http://192.168.178.190:9090"
+  LOCAL_AI_VLLM_PROFILE: "auto"
 
   # Summarization: remote via DGX Spark vLLM
   # Options:  large → port 8000, model "openai/gpt-oss-120b"
   #           small → port 8001, model "ibm/granite-3-3-8b-instruct"
-  TRANSKRIPTOR_SUMMARY_BACKEND: "openai"
-  TRANSKRIPTOR_OPENAI_BASE_URL: "http://192.168.178.190:8001/v1"
-  TRANSKRIPTOR_OPENAI_API_KEY: "none"
-  TRANSKRIPTOR_OPENAI_MODEL: "ibm/granite-3-3-8b-instruct"
+  LOCAL_AI_SUMMARY_BACKEND: "openai"
+  LOCAL_AI_OPENAI_BASE_URL: "http://192.168.178.190:8001/v1"
+  LOCAL_AI_OPENAI_API_KEY: "none"
+  LOCAL_AI_OPENAI_MODEL: "ibm/granite-3-3-8b-instruct"
+  # Embedding server (vLLM bge-m3 on the DGX) for semantic Notes search
+  LOCAL_AI_EMBEDDING_BASE_URL: "http://192.168.178.190:8002/v1"
+  LOCAL_AI_EMBEDDING_MODEL: "bge-m3"
+  # Self-hosted SearXNG (ad-free web search) — in-cluster service
+  LOCAL_AI_SEARXNG_URL: "http://searxng:8080"
 
   # Ollama fallback (not used when summary_backend=openai)
-  TRANSKRIPTOR_OLLAMA_BASE_URL: "http://localhost:11434"
-  TRANSKRIPTOR_OLLAMA_MODEL: "llama3.3:latest"
+  LOCAL_AI_OLLAMA_BASE_URL: "http://localhost:11434"
+  LOCAL_AI_OLLAMA_MODEL: "llama3.3:latest"
 
   # Language & diarization
-  TRANSKRIPTOR_LANGUAGE: "auto"
-  TRANSKRIPTOR_DIARIZATION_ENABLED: "true"
-  TRANSKRIPTOR_SUMMARIZATION_ENABLED: "true"
+  LOCAL_AI_LANGUAGE: "auto"
+  LOCAL_AI_DIARIZATION_ENABLED: "true"
+  LOCAL_AI_SUMMARIZATION_ENABLED: "true"
 
   # OpenTelemetry → Instana agent OTLP endpoint directly (no collector)
-  TRANSKRIPTOR_OTEL_ENABLED: "true"
-  TRANSKRIPTOR_OTEL_ENDPOINT: "http://192.168.178.190:4328"
-  TRANSKRIPTOR_OTEL_SERVICE_NAME: "transkriptor"
+  LOCAL_AI_OTEL_ENABLED: "true"
+  LOCAL_AI_OTEL_ENDPOINT: "http://192.168.178.190:4328"
+  LOCAL_AI_OTEL_SERVICE_NAME: "local-ai"
 
   # Instana GenAI observability via OpenLLMetry (traceloop-sdk)
   OTEL_RESOURCE_ATTRIBUTES: "INSTANA_PLUGIN=genai"
@@ -40,15 +45,15 @@ data:
   TRACELOOP_METRICS_ENABLED: "true"
 
   # Server
-  TRANSKRIPTOR_HOST: "0.0.0.0"
-  TRANSKRIPTOR_PORT: "8000"
-  TRANSKRIPTOR_DATA_DIR: "/app/data"
-  TRANSKRIPTOR_MAX_UPLOAD_SIZE_MB: "2048"
+  LOCAL_AI_HOST: "0.0.0.0"
+  LOCAL_AI_PORT: "8000"
+  LOCAL_AI_DATA_DIR: "/app/data"
+  LOCAL_AI_MAX_UPLOAD_SIZE_MB: "2048"
 
   # Multi-user / authentication
   # Admin is seeded on first start; the password comes from the
-  # transkriptor-secrets Secret (TRANSKRIPTOR_ADMIN_PASSWORD).
-  TRANSKRIPTOR_ADMIN_USERNAME: "admin"
-  TRANSKRIPTOR_SESSION_TTL_HOURS: "720"
+  # local-ai-secrets Secret (LOCAL_AI_ADMIN_PASSWORD).
+  LOCAL_AI_ADMIN_USERNAME: "admin"
+  LOCAL_AI_SESSION_TTL_HOURS: "720"
   # Ingress now serves HTTPS (ssl-redirect) so the session cookie is Secure.
-  TRANSKRIPTOR_SESSION_COOKIE_SECURE: "true"
+  LOCAL_AI_SESSION_COOKIE_SECURE: "true"

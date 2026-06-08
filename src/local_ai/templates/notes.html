@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Notes &amp; Manuals — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Notes &amp; Manuals</h2>
+        <small>
+            Lade Notizen und Handbücher (Word, PDF, Markdown, Text) hoch und durchsuche sie in
+            natürlicher Sprache — dein lokales LLM fasst die Fundstellen zusammen und gibt Quellen an.
+            Alles bleibt lokal.
+        </small>
+    </header>
+
+    <!-- ── Suche ─────────────────────────────────────────── -->
+    <form id="notes-form" onsubmit="return false">
+        <label for="notes-q"><strong>Frage / Suchbegriff</strong></label>
+        <div style="display:flex;gap:0.5rem;align-items:stretch">
+            <input type="text" id="notes-q" placeholder="z. B. Wie konfiguriere ich das VPN?"
+                   autocomplete="off" style="flex:1 1 auto;min-width:0;margin:0;width:auto" autofocus>
+            <button id="notes-btn" type="submit" style="flex:0 0 auto;width:auto;white-space:nowrap;margin:0">Suchen</button>
+        </div>
+    </form>
+
+    <div id="notes-status" style="display:none;margin-top:1rem"></div>
+    <div id="notes-answer" style="display:none;margin-top:1rem;padding:0.8rem 1rem;border-left:3px solid #1e88e5;background:rgba(30,136,229,0.07);border-radius:0.3rem">
+        <strong>Antwort</strong>
+        <div id="notes-answer-text" style="margin-top:0.5rem;white-space:pre-wrap"></div>
+    </div>
+    <div id="notes-sources" style="margin-top:1rem"></div>
+
+    <hr>
+
+    <!-- ── Dokumente ─────────────────────────────────────── -->
+    <details style="margin-top:0.5rem">
+        <summary style="cursor:pointer"><strong>Dokumente verwalten</strong> <small style="color:var(--muted-color,#888)">(<span id="doc-count">{{ documents|length }}</span>)</small></summary>
+
+        <label style="margin-top:0.6rem">Dokument hinzufügen
+            <input id="notes-file" type="file" multiple
+                   accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            <small style="color:var(--muted-color,#888)">Word, PDF, Markdown, Text — bis 25 MB. Mehrere mit Cmd/Strg-Klick.</small>
+        </label>
+        <button id="notes-upload-btn" onclick="uploadNotes()" style="margin-top:0.4rem">Hochladen</button>
+        <div id="notes-upload-status" class="error-message" style="display:none;margin-top:0.5rem"></div>
+
+        <div id="notes-doc-list" style="margin-top:0.8rem">
+            {% if documents %}
+            <table><tbody>
+                {% for d in documents %}
+                <tr data-id="{{ d.id }}">
+                    <td>{{ d.title }}</td>
+                    <td style="color:var(--muted-color,#888);font-size:0.82rem">{{ (d.char_count // 1000) }}k Zeichen</td>
+                    <td style="text-align:right">
+                        <button class="outline secondary" style="margin:0;padding:0.2rem 0.6rem;font-size:0.8rem"
+                                onclick="deleteNote('{{ d.id }}', this)">Entfernen</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody></table>
+            {% else %}
+            <p><small>Noch keine Dokumente. Lade oben welche hoch.</small></p>
+            {% endif %}
+        </div>
+    </details>
+</article>
+
+<script>
+function esc(t){const d=document.createElement('div');d.textContent=t==null?'':t;return d.innerHTML;}
+
+function linkifyCitations(text){
+    return esc(text).replace(/\[(\d{1,2})\]/g, (m,n)=>
+        `<a href="#src-${n}" style="text-decoration:none;font-weight:bold">[${n}]</a>`);
+}
+
+async function uploadNotes(){
+    const input = document.getElementById('notes-file');
+    const btn = document.getElementById('notes-upload-btn');
+    const err = document.getElementById('notes-upload-status');
+    err.style.display='none';
+    if(!input.files.length){ err.textContent='Keine Datei gewählt.'; err.style.display='block'; return; }
+    btn.disabled=true; btn.setAttribute('aria-busy','true'); btn.textContent='Lade hoch…';
+    let ok=0, fail=[];
+    for(const file of input.files){
+        const fd=new FormData(); fd.set('file', file);
+        try{
+            const r=await fetch('/api/notes/upload',{method:'POST',body:fd});
+            const d=await r.json();
+            if(!r.ok) throw new Error(d.detail||('Fehler '+r.status));
+            ok++;
+        }catch(e){ fail.push(file.name+': '+e.message); }
+    }
+    btn.disabled=false; btn.removeAttribute('aria-busy'); btn.textContent='Hochladen';
+    if(fail.length){ err.textContent=fail.join(' · '); err.style.display='block'; }
+    if(ok) window.location.reload();
+}
+
+async function deleteNote(id, btn){
+    if(!confirm('Dokument entfernen?')) return;
+    btn.disabled=true;
+    try{
+        const r=await fetch('/api/notes/'+id,{method:'DELETE'});
+        if(r.ok){ const row=btn.closest('tr'); if(row) row.remove();
+            const c=document.getElementById('doc-count'); if(c) c.textContent=Math.max(0,parseInt(c.textContent||'1')-1); }
+    }catch(e){ btn.disabled=false; }
+}
+
+const nForm=document.getElementById('notes-form');
+const nBtn=document.getElementById('notes-btn');
+const nQ=document.getElementById('notes-q');
+const nStatus=document.getElementById('notes-status');
+const nAnswer=document.getElementById('notes-answer');
+const nAnswerText=document.getElementById('notes-answer-text');
+const nSources=document.getElementById('notes-sources');
+
+async function runNotesSearch(){
+    const query=nQ.value.trim();
+    if(!query) return;
+    nBtn.disabled=true; nBtn.setAttribute('aria-busy','true'); nBtn.textContent='Suche…';
+    nStatus.style.display='none'; nAnswer.style.display='none'; nSources.innerHTML='';
+    try{
+        const r=await fetch('/api/notes/search',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({query})});
+        const d=await r.json();
+        if(!r.ok){ throw new Error(d.error||d.detail||('Fehler '+r.status)); }
+        if(d.error){ nStatus.className='error-message'; nStatus.textContent=d.error; nStatus.style.display='block'; return; }
+
+        // sources first (so [n] anchors exist)
+        if((d.sources||[]).length){
+            nSources.innerHTML='<h4 style="margin-top:1rem">Quellen</h4>'+d.sources.map(s=>`
+                <div id="src-${s.n}" style="padding:0.5rem 0;border-bottom:1px solid var(--muted-border-color,#eee)">
+                    <strong>[${s.n}] ${esc(s.title)}</strong>
+                    <div style="font-size:0.88rem;color:var(--muted-color,#888);margin-top:0.2rem">${esc(s.snippet)}…</div>
+                </div>`).join('');
+        }
+        nAnswerText.innerHTML=linkifyCitations(d.answer||'');
+        nAnswer.style.display='block';
+        nStatus.className=''; nStatus.style.color='var(--muted-color,#888)';
+        nStatus.textContent=(d.mode==='semantic'?'🧠 Semantische Suche':'🔤 Keyword-Suche')+` · ${d.matched||0} Fundstellen`;
+        nStatus.style.display='block';
+    }catch(e){
+        nStatus.className='error-message'; nStatus.textContent=e.message; nStatus.style.display='block';
+    }finally{
+        nBtn.disabled=false; nBtn.removeAttribute('aria-busy'); nBtn.textContent='Suchen';
+    }
+}
+if(nForm){
+    nForm.addEventListener('submit', runNotesSearch);
+    nQ.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); runNotesSearch(); }});
+}
+</script>
+
+{% endblock %}

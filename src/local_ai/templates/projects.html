@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Projects — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Projects</h2>
+        <small>Group a description and your generated or uploaded documents in one place.
+        The Consolidator can send its output straight into a project.</small>
+    </header>
+
+    <details>
+        <summary role="button" class="secondary">+ New project</summary>
+        <form method="post" action="/api/projects" style="margin-top:0.8rem">
+            <label>Name
+                <input type="text" name="name" placeholder="e.g. Concert App 2026" required>
+            </label>
+            <label>Description <small>(optional)</small>
+                <textarea name="description" rows="3" placeholder="What is this project about?"></textarea>
+            </label>
+            <button type="submit">Create project</button>
+        </form>
+    </details>
+</article>
+
+{% if projects %}
+<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))">
+    {% for p in projects %}
+    <article style="margin:0">
+        <header style="margin-bottom:0.4rem">
+            <a href="/projects/{{ p.id }}"><strong>{{ p.name }}</strong></a>
+        </header>
+        {% if p.description %}
+        <small style="color:var(--muted-color,#888);display:block;margin-bottom:0.5rem">
+            {{ p.description[:140] }}{% if p.description|length > 140 %}…{% endif %}
+        </small>
+        {% endif %}
+        <footer style="display:flex;justify-content:space-between;align-items:center">
+            <small><span class="tag">{{ p.doc_count }} doc{{ '' if p.doc_count == 1 else 's' }}</span></small>
+            <a href="/projects/{{ p.id }}" role="button" class="outline secondary" style="padding:0.15rem 0.7rem;font-size:0.8rem">Open</a>
+        </footer>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<p><small>No projects yet — create your first one above.</small></p>
+{% endif %}
+
+{% endblock %}

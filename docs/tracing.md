@@ -1,11 +1,11 @@
 # Observability & Tracing
 
-Transkriptor uses OpenTelemetry for distributed tracing, LLM metrics, and GPU monitoring, all forwarded to IBM Instana for visualization.
+local-ai uses OpenTelemetry for distributed tracing, LLM metrics, and GPU monitoring, all forwarded to IBM Instana for visualization.
 
 ## Overview
 
 ```
-Transkriptor Pod (K8s)
+local-ai Pod (K8s)
     |
     |  OTLP HTTP traces + metrics
     |
@@ -25,13 +25,13 @@ Instana Backend → Dashboards
 
 ## Components
 
-### 1. Transkriptor Tracing (`tracing.py`)
+### 1. local-ai Tracing (`tracing.py`)
 
 Initialized at app startup by `setup_tracing()`. Handles three concerns:
 
 #### TracerProvider (spans)
 
-The Instana init container in K8s sets its own `TracerProvider`. Transkriptor detects this and avoids overriding it:
+The Instana init container in K8s sets its own `TracerProvider`. local-ai detects this and avoids overriding it:
 
 ```python
 instana_agent_host = os.environ.get("INSTANA_AGENT_HOST")
@@ -147,7 +147,7 @@ if llm_metrics:
         output_tokens=completion_tokens,
         total_tokens=total,
         duration_ms=duration_ms,
-        service_name="transkriptor",
+        service_name="local-ai",
         model_id="ibm/granite-3-3-8b-instruct",
         ai_system="openai",
     )
@@ -218,7 +218,7 @@ Metrics scraped:
 
 These flow through the OTEL Collector's `metrics/gpu` pipeline to Instana, where they appear in custom dashboards.
 
-### 7. Transkriptor GPU Widget
+### 7. local-ai GPU Widget
 
 The app also exposes GPU metrics directly via `GET /api/gpu/metrics`, which pulls from both DCGM (raw metrics) and the GPU Manager (service status):
 
@@ -245,7 +245,7 @@ The `INSTANA_PLUGIN=genai` resource attribute is critical — it tells Instana t
 
 ```python
 resource_attrs = {
-    "service.name": "transkriptor",
+    "service.name": "local-ai",
     "service.version": "0.1.0",
     "INSTANA_PLUGIN": "genai",
 }
@@ -260,8 +260,8 @@ OTEL_RESOURCE_ATTRIBUTES=INSTANA_PLUGIN=genai
 
 ### No traces in Instana
 
-1. Check OTEL is enabled: `TRANSKRIPTOR_OTEL_ENABLED=true`
-2. Check endpoint: `TRANSKRIPTOR_OTEL_ENDPOINT=http://192.168.178.190:4328`
+1. Check OTEL is enabled: `LOCAL_AI_OTEL_ENABLED=true`
+2. Check endpoint: `LOCAL_AI_OTEL_ENDPOINT=http://192.168.178.190:4328`
 3. Check collector health: `curl http://192.168.178.190:13133/health`
 4. Check collector logs: `docker logs otel-collector --tail 20`
 

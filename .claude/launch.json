@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "transkriptor",
+      "name": "local-ai",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "transkriptor"],
+      "runtimeArgs": ["-m", "local-ai"],
       "port": 8000
     }
   ]

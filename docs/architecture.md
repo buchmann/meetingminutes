@@ -3,40 +3,55 @@
 ## Project Structure
 
 ```
-transkriptor-app/
+local-ai-app/
 ├── pyproject.toml                    # Package metadata + dependencies
 ├── requirements-remote.txt           # Slim deps for K8s (no torch/pyannote)
 ├── Dockerfile                        # Production image (remote-backend only)
 ├── .env.example                      # Configuration template
 ├── k8s/                              # Kubernetes manifests
 │   ├── namespace.yaml
-│   ├── configmap.yaml                # All TRANSKRIPTOR_* env vars
+│   ├── configmap.yaml                # All LOCAL_AI_* env vars
 │   ├── deployment.yaml               # Single-replica pod
 │   ├── service.yaml                  # ClusterIP on port 80
 │   ├── ingress.yaml                  # nginx ingress with upload tuning
 │   └── pvc.yaml                      # Persistent storage for SQLite + uploads
-├── src/transkriptor/
+├── src/local-ai/
 │   ├── __init__.py
-│   ├── __main__.py                   # Entry point: python -m transkriptor
+│   ├── __main__.py                   # Entry point: python -m local-ai
 │   ├── app.py                        # FastAPI factory + lifespan
 │   ├── config.py                     # Pydantic Settings (env-based config)
 │   ├── database.py                   # SQLite schema + async CRUD
 │   ├── models.py                     # Pydantic models (Job, Transcript, Summary)
 │   ├── tracing.py                    # OpenTelemetry + Instana setup
 │   ├── routers/
-│   │   ├── pages.py                  # HTML page routes (/, /jobs/{id}, /settings)
-│   │   ├── jobs.py                   # REST API (CRUD, SSE, GPU metrics, style)
+│   │   ├── pages.py                  # HTML page routes (login, /meetings, /settings)
+│   │   ├── jobs.py                   # Meetings REST API (CRUD, SSE, GPU metrics, style)
 │   │   ├── exports.py                # Export downloads (TXT, SRT, JSON)
-│   │   └── chat.py                   # Text Improver page + API
+│   │   ├── chat.py                   # Text Improver page + API
+│   │   ├── documents.py             # Document Checker (extract → improve → docx/pdf/md)
+│   │   ├── translate.py             # Translator EN↔DE (text + documents)
+│   │   ├── consolidate.py          # Consolidator (N sources → spec; → project)
+│   │   ├── projects.py             # Projects: workspace of description + docs
+│   │   ├── websearch.py            # Web Search via SearXNG + cited LLM answer
+│   │   ├── notes.py                 # Notes & Manuals (hybrid RAG search)
+│   │   ├── email.py                 # E-Mail weekly digest (IMAP, read-only + reply)
+│   │   └── immo.py                  # Immobilien / Mietverwaltung (role: vermieter)
 │   ├── services/
 │   │   ├── audio.py                  # ffmpeg preprocessing (→ 16kHz mono WAV)
 │   │   ├── transcriber.py            # Local faster-whisper / mlx-whisper
 │   │   ├── remote_transcriber.py     # Remote WhisperX API client
 │   │   ├── diarizer.py               # Local pyannote speaker diarization
 │   │   ├── merger.py                 # Align transcript segments with speakers
-│   │   ├── summarizer.py             # LLM summarization (Ollama / OpenAI API)
+│   │   ├── summarizer.py             # LLM summarization + token-aware truncation
 │   │   ├── text_improver.py          # Text correction via LLM
 │   │   ├── style_analyzer.py         # Writing style profile builder
+│   │   ├── document_checker.py      # Extract (docx/pdf/txt/md + OCR) + doc generation
+│   │   ├── translator.py            # EN↔DE translation
+│   │   ├── consolidator.py          # Multi-source spec generation
+│   │   ├── websearch.py             # SearXNG client + answer-with-sources
+│   │   ├── notes_kb.py              # Embeddings (bge-m3) + semantic/keyword retrieval
+│   │   ├── email_digest.py          # IMAP fetch/classify/digest + SMTP reply
+│   │   ├── immo.py                  # BetrKV extraction + apportionability checks
 │   │   ├── pipeline.py               # Orchestrates full processing flow
 │   │   ├── recorder.py               # Live audio recording (ffmpeg + BlackHole)
 │   │   └── _torchaudio_compat.py     # torchaudio compatibility shim
@@ -60,39 +75,103 @@ transkriptor-app/
 
 ## System Architecture
 
-### Pipeline Flow
+The app is a thin FastAPI service deployed in Kubernetes; all GPU work is
+offloaded to an NVIDIA DGX Spark over the LAN. The browser talks only to the
+pod; the pod fans out to the Spark, an in-cluster SearXNG, and external mail.
 
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Browser     │     │  K8s Cluster     │     │  DGX Spark      │
-│  Upload      │────▶│  Transkriptor    │     │  (128GB GPU+CPU)│
-│  28MB .m4a   │     │  Pod             │     │                 │
-└─────────────┘     └────────┬─────────┘     │  ┌───────────┐  │
-                             │                │  │ WhisperX  │  │
-                    ┌────────▼─────────┐     │  │ (~5GB)    │  │
-                    │ 1. Preprocess    │     │  │ port 8003 │  │
-                    │    ffmpeg → WAV  │     │  └───────────┘  │
-                    └────────┬─────────┘     │                 │
-                             │                │  ┌───────────┐  │
-                    ┌────────▼─────────┐     │  │ Granite   │  │
-                    │ 2. Transcribe    │────▶│  │ (~61GB)   │  │
-                    │    Send WAV to   │◀────│  │ port 8001 │  │
-                    │    WhisperX      │     │  └───────────┘  │
-                    └────────┬─────────┘     │       or        │
-                             │                │  ┌───────────┐  │
-                    ┌────────▼─────────┐     │  │ 120B      │  │
-                    │ 3. Summarize     │────▶│  │ (~90GB)   │  │
-                    │    Send text to  │◀────│  │ port 8000 │  │
-                    │    LLM           │     │  └───────────┘  │
-                    └────────┬─────────┘     │                 │
-                             │                │  ┌───────────┐  │
-                    ┌────────▼─────────┐     │  │GPU Manager│  │
-                    │ 4. Store results │     │  │ port 9090 │  │
-                    │    SQLite + UI   │     │  └───────────┘  │
-                    └──────────────────┘     └─────────────────┘
+### Deployment topology
+
+```mermaid
+flowchart TB
+    B["Browser<br/>HTMX · PicoCSS<br/>recording · upload · forms"]
+
+    subgraph K8S["Kubernetes cluster (192.168.178.35)"]
+        ING["nginx Ingress<br/>TLS · 600s read timeout"]
+        subgraph POD["local-ai Pod &mdash; FastAPI / Uvicorn"]
+            API["Routers + Services"]
+            DBV[("SQLite on PVC<br/>local_ai.db")]
+        end
+        SX["SearXNG<br/>:8080"]
+    end
+
+    subgraph SPARK["DGX Spark &mdash; GB10 · 128GB unified (192.168.178.190)"]
+        WX["WhisperX<br/>:8003"]
+        GR["vLLM Granite 4.0-H-Small<br/>32K ctx · :8001"]
+        EM["vLLM bge-m3 embeddings<br/>:8002"]
+        OSS["vLLM gpt-oss-120b<br/>:8000 · optional/off"]
+        GPU["GPU manager · DCGM<br/>:9090"]
+    end
+
+    EXT["External IMAP / SMTP<br/>Gmail · Yahoo · T-Online"]
+
+    B -->|HTTPS| ING --> API
+    API --> DBV
+    API -->|web search| SX
+    API -->|transcribe + diarize| WX
+    API -->|summaries · chat · extract| GR
+    API -.->|when enabled| OSS
+    API -->|embeddings| EM
+    API -->|GPU metrics| GPU
+    API -->|read mail · send reply| EXT
 ```
 
-The browser uploads audio to the Transkriptor pod running in Kubernetes. The pod preprocesses the audio locally with ffmpeg, then sends it to the DGX Spark for GPU-accelerated transcription (WhisperX) and summarization (Granite 8B or GPT-OSS 120B). The GPU Manager on the Spark orchestrates which models are loaded in GPU memory. Results are stored in SQLite and displayed in the browser.
+### Function map
+
+Every nav group maps to feature modules, each backed by a service that calls
+one of the remote engines.
+
+```mermaid
+flowchart LR
+    subgraph MEET["Meetings"]
+        MT["Transcription + summary<br/>standard / detailed"]
+    end
+    subgraph TEXT["Textfunctions"]
+        TI["Text Improver"]
+        DC["Document Checker<br/>docx/pdf/txt/md + OCR"]
+        TR["Translator EN&harr;DE"]
+        CO["Consolidator<br/>summary / product / project spec"]
+    end
+    subgraph PROJ["Projects"]
+        PR["Project: description + docs<br/>download docx/pdf/md/txt"]
+    end
+    subgraph PA["PA (Personal Assistant)"]
+        WS["Web Search"]
+        NK["Notes &amp; Manuals (RAG)"]
+        ED["E-Mail digest"]
+        IM["Immobilien<br/>role: vermieter"]
+    end
+
+    CO -. "save output" .-> PR
+
+    MT --> WXe["WhisperX + Granite"]
+    TI --> GRe["Granite LLM"]
+    DC --> GRe
+    TR --> GRe
+    CO --> GRe
+    WS --> SXe["SearXNG"]
+    NK --> EMe["bge-m3 + Granite"]
+    ED --> MXe["IMAP/SMTP + Granite"]
+    IM --> GRe
+```
+
+### Meeting processing pipeline
+
+```mermaid
+flowchart LR
+    U["Upload /<br/>browser recording"] --> FF["ffmpeg<br/>16kHz mono WAV"]
+    FF --> WXp["WhisperX<br/>transcribe + diarize"]
+    WXp --> MG["merge<br/>segments &harr; speakers"]
+    MG --> SUM["summarizer (Granite)<br/>token-aware truncation"]
+    SUM --> STt[("SQLite")]
+    STt --> EXP["exports<br/>TXT · SRT · JSON"]
+    STt --> UIp["job detail UI<br/>SSE live progress"]
+```
+
+The browser uploads audio (or records in-browser) to the local-ai pod. The pod
+preprocesses with ffmpeg, sends the WAV to WhisperX on the Spark for
+GPU-accelerated transcription + diarization, merges speaker labels, then asks
+Granite for a structured summary. Results are stored in SQLite and streamed to
+the UI via SSE.
 
 ### Context Window — Why It Matters
 
@@ -111,25 +190,24 @@ The LLM context window is like a desk — everything (instructions, transcript, 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Granite 8B — 8192 tokens:**
+**Granite 4.0-H-Small — 32768 tokens (current production):**
 
 ```
-Prompt:      1000 │████░░░░░░░░░░░░░░░░│
-Transcript:  5000 │████████████████████████░░░░░░│  ← truncated for long meetings
-Output:      2048 │██████████░░░░░░░░░░│
-                   └─── 8192 total ───┘
-```
-
-**GPT-OSS 120B — 32768 tokens:**
-
-```
-Prompt:      1500 │██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
-Transcript: 15000 │████████████████████████████████████████████████│  ← full meeting fits
-Output:     16000 │████████████████████████████████████████████████│
+Prompt:      1000 │██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+Transcript: 22000 │██████████████████████████████████████│  ← long meetings fit
+Output:      4096 │████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
                    └──────────────── 32768 total ────────────────┘
 ```
 
-The 120B model can handle ~3x more transcript text, meaning meetings up to ~34 minutes fit without truncation vs ~11 minutes for Granite.
+Granite was raised from 8K → **32768** tokens (it natively supports 128K). At
+32K a full ~34-minute meeting fits without truncation, and the Immobilien
+extraction runs in a single LLM call instead of being chunked. The app's
+`summarizer._MODEL_PROFILES["granite"]` mirrors this (`context_window: 32768`,
+`max_output_tokens: 4096`).
+
+> gpt-oss-120b (`:8000`, MXFP4, also 32K) is an experimental alternative — see
+> [models.md](models.md). It needs a custom vLLM build for the GB10's MXFP4
+> kernels and is **off by default**; Granite is production.
 
 ### Why More Context Needs More GPU Memory
 
@@ -145,7 +223,7 @@ For Granite (40 layers, MoE hybrid):
 
 The model weights themselves (61GB for Granite, ~90GB for 120B) stay the same. But the KV cache grows linearly with context length. With concurrent requests (`--max-num-seqs`), it multiplies: 8 concurrent requests at 32k context = 8 x 8GB = 64GB extra — which would not fit alongside the model weights on 128GB.
 
-That is why Granite runs at 8k context (manageable KV cache) and the 120B model can afford 32k because it only serves one request at a time.
+Granite runs at 32K with `--gpu-memory-utilization 0.72`, leaving headroom for the KV cache of a few concurrent requests alongside its weights. Because the GB10 has only 128GB **unified** memory, two large models cannot be resident at once — Granite (~92GB) and gpt-oss-120b (~83GB) exceed it, so only one big model is served at a time.
 
 ### Temperature — Controlling Randomness
 
@@ -255,7 +333,7 @@ Generates structured meeting minutes from transcripts. This is the most complex 
 
 ```python
 _MODEL_PROFILES = {
-    "granite":     {"context_window": 8192,  "max_output_tokens": 2048, "prompt_reserve_tokens": 800},
+    "granite":     {"context_window": 32768, "max_output_tokens": 4096,  "prompt_reserve_tokens": 800},
     "gpt-oss-120b": {"context_window": 32768, "max_output_tokens": 16000, "prompt_reserve_tokens": 1500},
 }
 ```
@@ -281,7 +359,7 @@ Corrects spelling, grammar, and clarity in pasted text while preserving the user
 - **Language detection**: Counts German stopwords — if >10% of words are German stopwords, treats as German
 - **Style profile**: Loads from `data/style_profile.txt`, injected into the prompt
 - **Response cleaning**: Strips `<think>` blocks and common LLM preambles ("Here's the corrected version:")
-- **Input limit**: 6000 chars max to fit within Granite's 8k context window
+- **Input limit**: token-aware truncation against Granite's 32K context window
 - **Temperature**: 0.3 (slightly creative for natural-sounding corrections)
 
 ### Remote Transcriber (`services/remote_transcriber.py`)
@@ -327,8 +405,8 @@ Built with HTMX + PicoCSS — no JavaScript framework, no build step.
 The Dockerfile installs only `requirements-remote.txt` — no torch, pyannote, or whisper. All ML work is offloaded to DGX Spark. The pod is lightweight (~256MB RAM).
 
 ```
-TRANSKRIPTOR_TRANSCRIPTION_BACKEND=remote
-TRANSKRIPTOR_SUMMARY_BACKEND=openai
+LOCAL_AI_TRANSCRIPTION_BACKEND=remote
+LOCAL_AI_SUMMARY_BACKEND=openai
 ```
 
 ### Local (Development)
@@ -336,6 +414,6 @@ TRANSKRIPTOR_SUMMARY_BACKEND=openai
 Full `pyproject.toml` dependencies including torch, faster-whisper, pyannote.audio. Everything runs on the local machine. Needs ~16GB RAM for whisper + diarization.
 
 ```
-TRANSKRIPTOR_TRANSCRIPTION_BACKEND=local
-TRANSKRIPTOR_SUMMARY_BACKEND=ollama
+LOCAL_AI_TRANSCRIPTION_BACKEND=local
+LOCAL_AI_SUMMARY_BACKEND=ollama
 ```

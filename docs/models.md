@@ -1,6 +1,6 @@
 # Model Integration
 
-How Transkriptor works with WhisperX, Granite, the 120B model, and the GPU Manager on DGX Spark.
+How local-ai works with WhisperX, Granite, the 120B model, and the GPU Manager on DGX Spark.
 
 ## Hardware
 
@@ -51,7 +51,7 @@ Response: JSON with segments, each containing speaker label, start/end timestamp
 | GPU Memory | ~61GB |
 | vLLM Flag | `--max-model-len 8192` |
 
-Granite is served via vLLM with an OpenAI-compatible API. Transkriptor uses the OpenAI Python SDK to call it:
+Granite is served via vLLM with an OpenAI-compatible API. local-ai uses the OpenAI Python SDK to call it:
 
 ```
 POST http://192.168.178.190:8001/v1/chat/completions
@@ -108,8 +108,8 @@ The 120B model is a much larger, higher-quality alternative to Granite. It produ
 **Switching to 120B:** Change two values in the configmap (or `.env`):
 
 ```yaml
-TRANSKRIPTOR_OPENAI_BASE_URL: "http://192.168.178.190:8000/v1"
-TRANSKRIPTOR_OPENAI_MODEL: "openai/gpt-oss-120b"
+LOCAL_AI_OPENAI_BASE_URL: "http://192.168.178.190:8000/v1"
+LOCAL_AI_OPENAI_MODEL: "openai/gpt-oss-120b"
 ```
 
 The pipeline and summarizer auto-detect the model and adjust:

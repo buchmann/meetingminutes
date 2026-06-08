@@ -1,0 +1,96 @@
+# SearXNG — self-hosted, ad-free metasearch with JSON API.
+# Reached by the app at http://searxng:8080 (same namespace).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-settings
+  namespace: local-ai
+data:
+  settings.yml: |
+    use_default_settings: true
+    general:
+      instance_name: "local-ai search"
+      donation_url: false
+      contact_url: false
+      enable_metrics: false
+    server:
+      secret_key: "692f5bec4ca401148c57ab2cb3e42d6db737f109856861179e12458f545ba9f4"
+      limiter: false
+      public_instance: false
+      image_proxy: false
+      method: "GET"
+    search:
+      safe_search: 0
+      autocomplete: ""
+      default_lang: "auto"
+      formats:
+        - html
+        - json
+    ui:
+      static_use_hash: true
+    # A lean set of reliable general engines (no logins/keys needed).
+    engines:
+      - name: duckduckgo
+        disabled: false
+      - name: brave
+        disabled: false
+      - name: bing
+        disabled: false
+      - name: wikipedia
+        disabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  namespace: local-ai
+  labels: { app: searxng }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: searxng }
+  template:
+    metadata:
+      labels: { app: searxng }
+    spec:
+      containers:
+        - name: searxng
+          image: searxng/searxng:latest
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            # Explicit values override the k8s service-link env vars
+            # (a Service named "searxng" otherwise injects
+            #  SEARXNG_PORT=tcp://<clusterIP>:8080, which breaks granian's --port).
+            - { name: SEARXNG_PORT, value: "8080" }
+            - { name: SEARXNG_BIND_ADDRESS, value: "0.0.0.0" }
+            # granian reads GRANIAN_* directly; force IPv4 host/port so it does
+            # not try an IPv6 socket (EAFNOSUPPORT on IPv4-only nodes).
+            - { name: GRANIAN_HOST, value: "0.0.0.0" }
+            - { name: GRANIAN_PORT, value: "8080" }
+            - { name: SEARXNG_BASE_URL, value: "http://searxng:8080/" }
+            - { name: SEARXNG_SETTINGS_PATH, value: "/etc/searxng/settings.yml" }
+          volumeMounts:
+            - { name: settings, mountPath: /etc/searxng/settings.yml, subPath: settings.yml }
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits:   { cpu: "1",    memory: "512Mi" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: settings
+          configMap:
+            name: searxng-settings
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng
+  namespace: local-ai
+  labels: { app: searxng }
+spec:
+  selector: { app: searxng }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

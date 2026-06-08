@@ -1,3 +1,3 @@
 #!/bin/bash
-cd /Users/manfred/claude/Code/transkriptor-app
-exec python -m transkriptor
+cd /Users/manfred/claude/Code/local-ai-app
+exec python -m local-ai

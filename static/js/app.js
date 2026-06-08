@@ -42,3 +42,54 @@ document.addEventListener('click', async (e) => {
         }
     }
 });
+
+// ── Hallucination / creativity slider (LLM temperature) ─────────────────
+// Reusable control. Markup:
+//   <div class="halluci" data-default="0.3">
+//     <input type="range" class="halluci-slider" min="0" max="1" step="0.05">
+//     <span class="halluci-value"></span>
+//     <button type="button" class="halluci-reset">Reset</button>
+//   </div>
+// Read the chosen value with window.halluciValue(rootEl) → string (e.g. "0.30").
+function setupHallucinationSliders(root) {
+    const scope = root || document;
+    scope.querySelectorAll('.halluci').forEach((ctrl) => {
+        if (ctrl.dataset.wired === '1') return;       // idempotent
+        ctrl.dataset.wired = '1';
+        const slider = ctrl.querySelector('.halluci-slider');
+        const valEl = ctrl.querySelector('.halluci-value');
+        const resetBtn = ctrl.querySelector('.halluci-reset');
+        const def = parseFloat(ctrl.dataset.default);
+        const defStr = isNaN(def) ? '0.30' : def.toFixed(2);
+
+        function render() {
+            const v = parseFloat(slider.value);
+            if (valEl) valEl.textContent = v.toFixed(2);
+            // Mark the reset button muted when already at default.
+            if (resetBtn) {
+                const atDefault = Math.abs(v - def) < 1e-9;
+                resetBtn.disabled = atDefault;
+            }
+        }
+        if (!isNaN(def)) slider.value = def;           // initialise to default
+        slider.addEventListener('input', render);
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                if (!isNaN(def)) slider.value = def;
+                render();
+            });
+        }
+        render();
+    });
+}
+
+// Helper a page can call to read the current temperature value from its slider.
+window.halluciValue = function (root) {
+    const ctrl = (root || document).querySelector('.halluci');
+    if (!ctrl) return '';
+    const slider = ctrl.querySelector('.halluci-slider');
+    return slider ? slider.value : '';
+};
+
+// Auto-wire any sliders present on the page.
+document.addEventListener('DOMContentLoaded', () => setupHallucinationSliders());

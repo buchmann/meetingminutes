@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block title %}Translator — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Translator</h2>
+        <small>
+            English &harr; German. Paste text for an instant result, or upload a Word/PDF/Markdown/text document
+            to download a translated version.
+            {% if has_style_profile %} Your writing style can be applied to word choice (toggle below).{% endif %}
+        </small>
+    </header>
+
+    <label>Direction</label>
+    <div role="group" id="tr-dir-group" style="display:flex;gap:0;margin-bottom:0.5rem">
+        <button type="button" class="outline secondary tr-dir-btn" data-dir="en2de"
+                style="margin:0;border-top-right-radius:0;border-bottom-right-radius:0;flex:1">
+            English → Deutsch
+        </button>
+        <button type="button" class="outline secondary tr-dir-btn" data-dir="de2en"
+                style="margin:0;border-radius:0;border-left:none;flex:1">
+            Deutsch → English
+        </button>
+        <button type="button" class="outline secondary tr-dir-btn" data-dir="auto"
+                style="margin:0;border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;flex:0 0 auto;padding-left:1rem;padding-right:1rem">
+            Auto
+        </button>
+    </div>
+    <select id="tr-direction" style="display:none">
+        <option value="auto" selected>auto</option>
+        <option value="en2de">en2de</option>
+        <option value="de2en">de2en</option>
+    </select>
+    <script>
+        // Sync the segmented-control buttons with the (hidden) direction <select>.
+        // We keep the <select> because the rest of the script reads its .value.
+        (function () {
+            const sel = document.getElementById('tr-direction');
+            const buttons = document.querySelectorAll('.tr-dir-btn');
+            function apply(value) {
+                sel.value = value;
+                buttons.forEach(b => {
+                    if (b.dataset.dir === value) {
+                        b.classList.remove('secondary');
+                        b.classList.remove('outline');
+                    } else {
+                        b.classList.add('secondary');
+                        b.classList.add('outline');
+                    }
+                });
+            }
+            buttons.forEach(b => b.addEventListener('click', () => apply(b.dataset.dir)));
+            apply('auto');  // initial highlight
+        })();
+    </script>
+
+    <label style="display:flex;align-items:center;gap:0.5rem">
+        <input id="tr-apply-style" type="checkbox" value="true"
+               {% if not has_style_profile %}disabled{% endif %}>
+        Apply my writing style to the translation
+        {% if not has_style_profile %}
+        <small style="color:var(--muted-color,#888)">(no profile — add one in <a href="/settings">Settings</a>)</small>
+        {% endif %}
+    </label>
+
+    <div class="halluci" data-default="0.1" style="margin:0.8rem 0;padding:0.6rem 0.8rem;border:1px solid var(--muted-border-color,#ccc);border-radius:0.4rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
+            <label style="margin:0">Halluzination / Kreativität: <strong class="halluci-value">0.10</strong></label>
+            <button type="button" class="halluci-reset outline secondary" style="margin:0;padding:0.2rem 0.7rem;font-size:0.8rem">Reset auf Standard</button>
+        </div>
+        <input type="range" class="halluci-slider" min="0" max="1" step="0.05" style="width:100%;margin:0.4rem 0 0">
+        <small style="color:var(--muted-color,#888)">Niedrig = wörtlich/faktentreu (empfohlen für Übersetzung) · Hoch = freier. Standard: 0.10</small>
+    </div>
+
+    <hr>
+
+    <h4>Text</h4>
+    <div class="chat-input-area">
+        <textarea id="tr-input" placeholder="Paste text in English or German…" rows="8"></textarea>
+        <div class="chat-controls">
+            <span id="tr-char-count" class="chat-char-count">0 chars</span>
+            <button id="tr-text-btn" onclick="translateTextNow()">Translate Text</button>
+        </div>
+    </div>
+
+    <div id="tr-text-result" style="display:none;margin-top:1rem">
+        <div class="chat-result-header">
+            <h4 style="margin:0">Translation
+                <span id="tr-result-badge" class="tag" style="font-size:0.7em"></span>
+            </h4>
+            <div class="chat-result-actions">
+                <button class="outline small" onclick="copyTranslation(this)">Copy</button>
+            </div>
+        </div>
+        <div id="tr-output" class="chat-improved-text" style="margin-top:0.5rem;white-space:pre-wrap"></div>
+        <div id="tr-text-error" class="error-message" style="display:none;margin-top:0.5rem"></div>
+    </div>
+
+    <hr style="margin-top:2rem">
+
+    <h4>Document</h4>
+    <form id="tr-doc-form" enctype="multipart/form-data">
+        <label>
+            File
+            <input id="tr-file" type="file" name="file" required
+                   accept=".docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            <small>Word, PDF, Markdown, or plain text — up to 25 MB.</small>
+        </label>
+        <label>
+            Output format
+            <select id="tr-output-format" name="output_format">
+                <option value="docx" selected>Word (.docx)</option>
+                <option value="pdf">PDF (.pdf)</option>
+                <option value="md">Markdown (.md)</option>
+                <option value="txt">Plain Text (.txt)</option>
+            </select>
+        </label>
+        <button id="tr-doc-btn" type="submit">Translate &amp; Download</button>
+    </form>
+    <div id="tr-doc-status" class="error-message" style="display:none;margin-top:1rem"></div>
+    <div id="tr-doc-meta" style="display:none;margin-top:1rem">
+        <p><strong>Done.</strong> <span id="tr-doc-meta-text"></span></p>
+        <small id="tr-doc-meta-warning" class="error-text" style="display:none"></small>
+    </div>
+</article>
+
+<script>
+const trInput = document.getElementById('tr-input');
+const trChars = document.getElementById('tr-char-count');
+trInput.addEventListener('input', () => { trChars.textContent = trInput.value.length + ' chars'; });
+
+function langLabel(code) {
+    return code === 'de' ? 'Deutsch' : code === 'en' ? 'English' : code;
+}
+
+async function translateTextNow() {
+    const text = trInput.value.trim();
+    const btn = document.getElementById('tr-text-btn');
+    const resultBox = document.getElementById('tr-text-result');
+    const errorBox = document.getElementById('tr-text-error');
+    const outBox = document.getElementById('tr-output');
+    const badge = document.getElementById('tr-result-badge');
+    if (!text) return;
+
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.textContent = 'Translating…';
+    errorBox.style.display = 'none';
+    resultBox.style.display = 'none';
+
+    const payload = {
+        text,
+        direction: document.getElementById('tr-direction').value,
+        apply_style: document.getElementById('tr-apply-style').checked,
+        temperature: window.halluciValue(),
+    };
+
+    try {
+        const resp = await fetch('/api/translate/text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!resp.ok || (data.error && !data.translated)) {
+            errorBox.textContent = data.error || 'Translation failed';
+            errorBox.style.display = 'block';
+            resultBox.style.display = 'block';
+            outBox.textContent = '';
+            return;
+        }
+        outBox.textContent = data.translated;
+        badge.textContent = langLabel(data.source_lang) + ' → ' + langLabel(data.target_lang);
+        resultBox.style.display = 'block';
+        if (data.error) {
+            errorBox.textContent = 'Partial: ' + data.error;
+            errorBox.style.display = 'block';
+        }
+    } catch (e) {
+        errorBox.textContent = 'Network error: ' + e.message;
+        errorBox.style.display = 'block';
+        resultBox.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = 'Translate Text';
+    }
+}
+
+function copyTranslation(btn) {
+    const text = document.getElementById('tr-output').textContent;
+    const flash = (msg) => { const orig = 'Copy'; btn.textContent = msg; setTimeout(() => { btn.textContent = orig; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => flash('Copied!')).catch(() => flash('Copy failed'));
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.top = '-9999px';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        flash(ok ? 'Copied!' : 'Copy failed');
+    }
+}
+
+// Cmd/Ctrl-Enter to translate
+trInput.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        translateTextNow();
+    }
+});
+
+// Document form
+const trDocForm = document.getElementById('tr-doc-form');
+const trDocBtn = document.getElementById('tr-doc-btn');
+const trDocStatus = document.getElementById('tr-doc-status');
+const trDocMeta = document.getElementById('tr-doc-meta');
+const trDocMetaText = document.getElementById('tr-doc-meta-text');
+const trDocMetaWarn = document.getElementById('tr-doc-meta-warning');
+
+trDocForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    trDocStatus.style.display = 'none';
+    trDocMeta.style.display = 'none';
+    trDocMetaWarn.style.display = 'none';
+    trDocBtn.disabled = true;
+    trDocBtn.setAttribute('aria-busy', 'true');
+    trDocBtn.textContent = 'Translating (this can take a minute)…';
+
+    const fd = new FormData(trDocForm);
+    fd.set('direction', document.getElementById('tr-direction').value);
+    fd.set('apply_style', document.getElementById('tr-apply-style').checked ? 'true' : 'false');
+    fd.set('temperature', window.halluciValue());
+
+    try {
+        const resp = await fetch('/api/translate/document', { method: 'POST', body: fd });
+        if (!resp.ok) {
+            let msg = 'Server error (' + resp.status + ')';
+            try { const j = await resp.json(); msg = j.detail || msg; } catch (_e) {}
+            throw new Error(msg);
+        }
+        const src = resp.headers.get('X-Source-Lang') || '';
+        const tgt = resp.headers.get('X-Target-Lang') || '';
+        const chunks = resp.headers.get('X-Chunks') || '1';
+        const origChars = resp.headers.get('X-Original-Chars') || '?';
+        const newChars = resp.headers.get('X-Translated-Chars') || '?';
+        const styleApplied = resp.headers.get('X-Style-Applied') === '1';
+        const warning = resp.headers.get('X-Warning');
+
+        let filename = 'translated-document';
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^"]+)"?/i);
+        if (m) filename = m[1];
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        trDocMetaText.textContent =
+            `${langLabel(src)} → ${langLabel(tgt)} · Chunks: ${chunks} · ${origChars} → ${newChars} chars`
+            + (styleApplied ? ' · style applied' : '');
+        if (warning) {
+            trDocMetaWarn.textContent = 'Warning: ' + warning;
+            trDocMetaWarn.style.display = 'block';
+        }
+        trDocMeta.style.display = 'block';
+
+    } catch (err) {
+        trDocStatus.textContent = err.message;
+        trDocStatus.style.display = 'block';
+    } finally {
+        trDocBtn.disabled = false;
+        trDocBtn.removeAttribute('aria-busy');
+        trDocBtn.textContent = 'Translate & Download';
+    }
+});
+</script>
+
+{% endblock %}

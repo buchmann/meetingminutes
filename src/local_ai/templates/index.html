@@ -1,0 +1,808 @@
+{% extends "base.html" %}
+{% block title %}local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Record Meeting</h2>
+    </header>
+    <div id="recorder-section">
+        <div class="grid">
+            <label>
+                Microphone
+                <div style="display:flex;gap:0.4rem">
+                    <select id="rec-device" style="flex:1">
+                        <option value="">Default microphone</option>
+                    </select>
+                    <button type="button" class="outline secondary" id="rec-detect-btn"
+                            style="margin:0;padding:0.4rem 0.7rem;font-size:0.8rem;white-space:nowrap"
+                            onclick="detectDevices()" title="Grant permission and list all input devices">
+                        Detect
+                    </button>
+                </div>
+                <small style="color:var(--muted-color,#888)">Click <strong>Detect</strong> to grant mic permission and see every input — including BlackHole, Aggregate Devices, virtual loopback, etc.</small>
+            </label>
+            <label>
+                Language
+                <select id="rec-language">
+                    <option value="auto" selected>Auto-detect</option>
+                    <option value="en">English</option>
+                    <option value="de">German / Deutsch</option>
+                </select>
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                <input type="checkbox" id="rec-diarization" checked>
+                Speaker Diarization
+            </label>
+            <label>
+                <input type="checkbox" id="rec-summarization" checked>
+                AI Summary
+            </label>
+        </div>
+
+        <label>
+            Audioquelle
+            <select id="rec-mode" onchange="updateRecModeHint()">
+                <option value="mic" selected>Nur Mikrofon</option>
+                <option value="mix">Mikrofon + Meeting-/System-Audio (ohne BlackHole)</option>
+            </select>
+            <small id="rec-mode-hint" style="color:var(--muted-color,#888)"></small>
+        </label>
+
+        <!-- Live input level meter (active during preview + recording) -->
+        <div id="rec-meter-wrap" style="margin:0.6rem 0;display:flex;align-items:center;gap:0.6rem">
+            <button type="button" class="outline secondary" id="rec-preview-btn"
+                    style="margin:0;padding:0.4rem 0.8rem;font-size:0.85rem;white-space:nowrap"
+                    onclick="togglePreview()" title="Listen to the selected device and watch the input level">
+                ▶ Test input
+            </button>
+            <div style="flex:1;background:rgba(128,128,128,0.18);height:14px;border-radius:7px;overflow:hidden;position:relative">
+                <div id="rec-meter-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#43a047 0%,#43a047 60%,#fb8c00 75%,#e53935 90%);transition:width 60ms linear"></div>
+                <div id="rec-meter-peak" style="position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,0.85);left:0;transition:left 120ms linear"></div>
+            </div>
+            <small id="rec-meter-db" style="font-family:monospace;min-width:4em;text-align:right;color:var(--muted-color,#888)">—</small>
+        </div>
+
+        <div class="rec-controls">
+            <button id="rec-start-btn" class="rec-btn" onclick="startRecording()">
+                <span class="rec-icon"></span> Record
+            </button>
+            <button id="rec-stop-btn" class="rec-btn rec-btn-stop" onclick="stopRecording()" style="display:none">
+                <span class="stop-icon"></span> Stop &amp; Transcribe
+            </button>
+            <span id="rec-timer" class="rec-timer" style="display:none">00:00</span>
+        </div>
+        <div id="rec-error" class="error-message" style="display:none"></div>
+    </div>
+</article>
+
+<article>
+    <header>
+        <h2>Upload Audio File</h2>
+    </header>
+    <form id="upload-form" enctype="multipart/form-data">
+        <div class="grid">
+            <label>
+                Audio File
+                <input type="file" name="file" accept=".wav,.mp3,.m4a,.ogg,.flac,.wma,.aac,.webm,.mp4" required>
+            </label>
+            <label>
+                Language
+                <select name="language">
+                    <option value="auto" selected>Auto-detect</option>
+                    <option value="en">English</option>
+                    <option value="de">German / Deutsch</option>
+                </select>
+            </label>
+        </div>
+        <div class="grid">
+            <label>
+                <input type="checkbox" name="diarization_enabled" value="true" checked>
+                Speaker Diarization
+            </label>
+            <label>
+                <input type="checkbox" name="summarization_enabled" value="true" checked>
+                AI Summary
+            </label>
+        </div>
+        <label>
+            Summary Depth
+            <select name="summary_detail">
+                <option value="standard" selected>Standard</option>
+                <option value="detailed">Detailed (≈2× content)</option>
+            </select>
+            <small style="color:var(--muted-color,#888)">"Detailed" produces twice as many topics, longer prose, and more sub-points. Takes longer to generate.</small>
+        </label>
+        <details>
+            <summary>Advanced Options</summary>
+            <div class="grid">
+                <label>
+                    Min Speakers
+                    <input type="number" name="min_speakers" min="1" max="20" placeholder="Auto">
+                </label>
+                <label>
+                    Max Speakers
+                    <input type="number" name="max_speakers" min="1" max="20" placeholder="Auto">
+                </label>
+            </div>
+        </details>
+        <button type="submit" id="upload-btn">Start Transcription</button>
+    </form>
+    <div id="upload-error" class="error-message" style="display:none"></div>
+</article>
+
+<article>
+    <header>
+        <h2>Reprocess Existing File</h2>
+        <small>Files already on the server — no re-upload needed</small>
+    </header>
+    <div id="reprocess-section">
+        <div id="reprocess-list" style="margin-bottom:1rem"></div>
+        <div id="reprocess-form" style="display:none">
+            <input type="hidden" id="rp-source-job">
+            <p id="rp-filename" style="margin-bottom:0.5rem"></p>
+            <div class="grid">
+                <label>
+                    Language
+                    <select id="rp-language">
+                        <option value="auto" selected>Auto-detect</option>
+                        <option value="en">English</option>
+                        <option value="de">German / Deutsch</option>
+                    </select>
+                </label>
+                <label>
+                    <input type="checkbox" id="rp-diarization" checked>
+                    Speaker Diarization
+                </label>
+                <label>
+                    <input type="checkbox" id="rp-summarization" checked>
+                    AI Summary
+                </label>
+            </div>
+            <label style="margin-bottom:1rem;display:block">
+                Summary Depth
+                <select id="rp-summary-detail">
+                    <option value="standard" selected>Standard</option>
+                    <option value="detailed">Detailed (≈2× content)</option>
+                </select>
+            </label>
+            <div style="margin-bottom:1rem">
+                <label>
+                    <input type="checkbox" id="rp-retranscribe">
+                    Re-transcribe
+                </label>
+                <small id="rp-cache-hint" style="display:block;margin-top:0.25rem;color:var(--muted-color,#888)">Unchecked: uses cached transcript, only re-summarizes (much faster)</small>
+            </div>
+            <button id="rp-btn" onclick="submitReprocess()">Reprocess</button>
+        </div>
+    </div>
+</article>
+
+<article>
+    <header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+            <h2 style="margin:0">My Jobs</h2>
+            <button class="outline secondary" style="margin:0;padding:0.3rem 0.8rem;font-size:0.85rem" onclick="cleanupJobs(this)">Clean Up Failed</button>
+        </div>
+    </header>
+    <div id="job-list" hx-get="/partials/jobs" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading jobs...</p>
+    </div>
+</article>
+
+<article>
+    <header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+            <h2 style="margin:0">Shared with everyone</h2>
+            <small>Transcriptions other users have shared</small>
+        </div>
+    </header>
+    <div id="shared-list" hx-get="/partials/shared" hx-trigger="load, every 10s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading shared transcriptions...</p>
+    </div>
+</article>
+
+<script>
+// ── Recording (in-browser via MediaRecorder, uploaded to /api/jobs) ──
+let recTimerInterval = null;
+let recStartTime = null;
+let mediaRecorder = null;
+let recChunks = [];
+let recStream = null;       // microphone stream
+let displayStream = null;   // getDisplayMedia stream (tab/system audio) in mix mode
+let mixCtx = null;          // AudioContext used to mix mic + system audio
+let mixDest = null;         // MediaStreamDestination feeding the recorder in mix mode
+
+const recSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+const displaySupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+
+// Populate microphone list (device labels appear after the first permission grant)
+// ── Device enumeration ─────────────────────────────────────────────
+// Browsers only expose device LABELS after the user has granted mic
+// permission once. enumerateDevices() before that returns entries with
+// empty labels and may even hide virtual devices (BlackHole, Aggregate,
+// etc.) on Safari. So:
+//   - loadDevices()  : harmless initial fill (no permission prompt)
+//   - detectDevices(): forces a permission prompt and re-enumerates,
+//                      then immediately releases the stream
+async function loadDevices(preserveSelection) {
+    const select = document.getElementById('rec-device');
+    const errDiv = document.getElementById('rec-error');
+    if (!recSupported) {
+        document.getElementById('rec-start-btn').disabled = true;
+        errDiv.textContent = 'Recording needs microphone access, which browsers only allow over HTTPS (or localhost). Open this site via https://.';
+        errDiv.style.display = 'block';
+        return;
+    }
+    const previousValue = preserveSelection ? select.value : '';
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        select.innerHTML = '<option value="">Default microphone</option>';
+        mics.forEach((d, i) => {
+            const opt = document.createElement('option');
+            opt.value = d.deviceId;
+            opt.textContent = d.label || `Input ${i + 1} (grant permission to see name)`;
+            select.appendChild(opt);
+        });
+        // Restore previous selection if it still exists
+        if (previousValue && [...select.options].some(o => o.value === previousValue)) {
+            select.value = previousValue;
+        }
+    } catch (e) { /* device labels need permission; ignore */ }
+}
+
+async function detectDevices() {
+    const btn = document.getElementById('rec-detect-btn');
+    const errDiv = document.getElementById('rec-error');
+    errDiv.style.display = 'none';
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    let tmpStream = null;
+    try {
+        // Trigger the permission prompt with a minimal getUserMedia call,
+        // then release the stream immediately. After this, enumerateDevices()
+        // returns real labels for every input the OS exposes to the browser.
+        tmpStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        await loadDevices(true);
+        btn.textContent = 'Refresh';
+    } catch (e) {
+        errDiv.textContent = 'Permission denied or no input available: ' + e.message;
+        errDiv.style.display = 'block';
+    } finally {
+        if (tmpStream) tmpStream.getTracks().forEach(t => t.stop());
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+    }
+}
+
+// Re-list devices when the OS reports a change (BlackHole installed,
+// USB mic plugged in, etc.) so the user doesn't have to refresh.
+if (recSupported && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => loadDevices(true));
+}
+
+loadDevices();
+updateRecModeHint();  // set initial audio-source hint + disable mix if unsupported
+
+// ── Live input level meter (Web Audio API) ─────────────────────────
+// Active during preview ("Test input" button) and during recording, so the
+// user can confirm audio is actually being captured (QuickTime-style).
+let meterCtx = null;       // AudioContext
+let meterSrc = null;       // MediaStreamSource
+let meterAnalyser = null;  // AnalyserNode
+let meterRaf = null;       // requestAnimationFrame handle
+let meterStream = null;    // preview-only stream
+let recMeterClone = null;  // CLONE of the recording stream used ONLY for the meter,
+                           // so Web Audio never touches the stream MediaRecorder reads
+                           // (sharing one stream breaks recording in Safari).
+let peakHold = 0;          // 0..1, decays slowly
+let peakDecayedAt = 0;
+
+function startMeter(stream) {
+    stopMeter();
+    try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        meterCtx = new AC();
+        meterSrc = meterCtx.createMediaStreamSource(stream);
+        meterAnalyser = meterCtx.createAnalyser();
+        meterAnalyser.fftSize = 1024;
+        meterAnalyser.smoothingTimeConstant = 0.3;
+        meterSrc.connect(meterAnalyser);
+        // NOTE: we deliberately do NOT connect to meterCtx.destination —
+        // playing the mic back to the speakers would create a feedback loop.
+
+        const buf = new Float32Array(meterAnalyser.fftSize);
+        const bar = document.getElementById('rec-meter-bar');
+        const peakEl = document.getElementById('rec-meter-peak');
+        const dbEl = document.getElementById('rec-meter-db');
+
+        const tick = () => {
+            meterAnalyser.getFloatTimeDomainData(buf);
+            // RMS in the time-domain buffer → perceived level
+            let sum = 0, max = 0;
+            for (let i = 0; i < buf.length; i++) {
+                const v = buf[i];
+                sum += v * v;
+                const a = Math.abs(v);
+                if (a > max) max = a;
+            }
+            const rms = Math.sqrt(sum / buf.length);
+            // Map RMS to 0..1 with a perceptual curve (rough but works well).
+            // ~0.0001 = silent, ~0.3 = loud speech.
+            const level = Math.min(1, Math.pow(rms * 3.2, 0.6));
+            bar.style.width = (level * 100).toFixed(1) + '%';
+
+            // Peak hold: jumps up immediately, drifts down after ~600ms.
+            const now = performance.now();
+            if (max > peakHold) {
+                peakHold = max;
+                peakDecayedAt = now;
+            } else if (now - peakDecayedAt > 600) {
+                peakHold = Math.max(level, peakHold - 0.01);
+            }
+            peakEl.style.left = (Math.min(1, peakHold) * 100).toFixed(1) + '%';
+
+            // dBFS readout (clamped at -60 dB so the display doesn't flicker at silence)
+            const db = max > 0 ? Math.max(-60, 20 * Math.log10(max)) : -60;
+            dbEl.textContent = (db <= -60 ? '−∞' : db.toFixed(1)) + ' dB';
+
+            meterRaf = requestAnimationFrame(tick);
+        };
+        meterRaf = requestAnimationFrame(tick);
+    } catch (e) {
+        console.warn('Level meter failed:', e);
+    }
+}
+
+function stopMeter() {
+    if (meterRaf) { cancelAnimationFrame(meterRaf); meterRaf = null; }
+    if (meterSrc) { try { meterSrc.disconnect(); } catch (_e) {} meterSrc = null; }
+    if (meterAnalyser) { try { meterAnalyser.disconnect(); } catch (_e) {} meterAnalyser = null; }
+    if (meterCtx) { meterCtx.close().catch(() => {}); meterCtx = null; }
+    const bar = document.getElementById('rec-meter-bar');
+    const peakEl = document.getElementById('rec-meter-peak');
+    const dbEl = document.getElementById('rec-meter-db');
+    if (bar) bar.style.width = '0%';
+    if (peakEl) peakEl.style.left = '0%';
+    if (dbEl) dbEl.textContent = '—';
+    peakHold = 0;
+}
+
+async function togglePreview() {
+    const btn = document.getElementById('rec-preview-btn');
+    if (meterStream) {
+        // Currently previewing → stop
+        stopMeter();
+        meterStream.getTracks().forEach(t => t.stop());
+        meterStream = null;
+        btn.textContent = '▶ Test input';
+        return;
+    }
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        // Meter is already running on the recording stream — nothing to preview
+        return;
+    }
+    const errDiv = document.getElementById('rec-error');
+    errDiv.style.display = 'none';
+    const deviceId = document.getElementById('rec-device').value;
+    try {
+        meterStream = await navigator.mediaDevices.getUserMedia({
+            audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+        });
+        // Now that we have permission, refresh device labels in case any were anonymous.
+        loadDevices(true);
+        startMeter(meterStream);
+        btn.textContent = '■ Stop test';
+    } catch (e) {
+        errDiv.textContent = 'Could not open input: ' + e.message;
+        errDiv.style.display = 'block';
+        meterStream = null;
+    }
+}
+
+function pickMime() {
+    if (!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function') return '';
+    // Chrome prefers webm/opus; Safari only supports mp4/aac → fall through to it.
+    const prefs = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'];
+    for (const m of prefs) {
+        try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (_e) { /* ignore */ }
+    }
+    return '';
+}
+
+function updateTimer() {
+    const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+    const mm = String(Math.floor(elapsed / 60) % 60).padStart(2, '0');
+    const ss = String(elapsed % 60).padStart(2, '0');
+    const hh = Math.floor(elapsed / 3600);
+    document.getElementById('rec-timer').textContent =
+        hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+// Update the help text under the audio-source selector.
+function updateRecModeHint() {
+    const mode = document.getElementById('rec-mode').value;
+    const hint = document.getElementById('rec-mode-hint');
+    const modeSel = document.getElementById('rec-mode');
+    // Disable the mix option entirely if the browser lacks getDisplayMedia.
+    const mixOpt = modeSel.querySelector('option[value="mix"]');
+    if (mixOpt) mixOpt.disabled = !displaySupported;
+    if (mode === 'mix') {
+        hint.innerHTML =
+            'Nimmt zusätzlich den Ton eines Browser-Tabs oder (unter Windows) des ganzen Systems auf — '
+            + 'gemischt mit deinem Mikrofon. <strong>Beim Start im Teilen-Dialog "Audio teilen" / "Tab-Audio teilen" aktivieren.</strong> '
+            + 'Mac: nur Browser-Tab-Audio möglich (native Zoom/Teams-App braucht weiter BlackHole).';
+    } else {
+        hint.textContent = 'Nimmt nur das oben gewählte Mikrofon auf.';
+    }
+}
+
+// Build a single mixed MediaStream from the microphone + tab/system audio.
+// Throws with a user-friendly message on cancel / no-audio.
+async function buildMixedStream(deviceId) {
+    // 1. Microphone
+    const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+    });
+    recStream = micStream;  // tracked for teardown
+
+    // 2. Tab/system audio. getDisplayMedia REQUIRES a video request to offer
+    //    the audio checkbox; we discard the video track immediately.
+    let disp;
+    try {
+        disp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    } catch (e) {
+        throw new Error('Bildschirm-/Tab-Auswahl abgebrochen (' + e.message + ').');
+    }
+    disp.getVideoTracks().forEach(t => t.stop());  // we only want audio
+    const dispAudio = disp.getAudioTracks();
+    if (!dispAudio.length) {
+        disp.getTracks().forEach(t => t.stop());
+        throw new Error('Kein Audio im geteilten Inhalt. Bitte im Dialog "Audio teilen" bzw. '
+            + '"Tab-Audio teilen" ankreuzen und erneut versuchen.');
+    }
+    displayStream = disp;  // tracked for teardown (audio track stays live)
+
+    // 3. Mix mic + system audio via Web Audio into one output stream.
+    const AC = window.AudioContext || window.webkitAudioContext;
+    mixCtx = new AC();
+    if (mixCtx.state === 'suspended') { try { await mixCtx.resume(); } catch (_e) {} }
+    mixDest = mixCtx.createMediaStreamDestination();
+    mixCtx.createMediaStreamSource(micStream).connect(mixDest);
+    mixCtx.createMediaStreamSource(new MediaStream(dispAudio)).connect(mixDest);
+
+    // If the user clicks the browser's native "Stop sharing" bar, the display
+    // audio track ends — finish the recording gracefully.
+    dispAudio[0].addEventListener('ended', () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
+    });
+
+    return mixDest.stream;
+}
+
+// Stop and release every capture stream + the mixing context.
+function teardownStreams() {
+    stopMeter();
+    if (recMeterClone) { recMeterClone.getTracks().forEach(t => t.stop()); recMeterClone = null; }
+    if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
+    if (displayStream) { displayStream.getTracks().forEach(t => t.stop()); displayStream = null; }
+    if (mixCtx) { mixCtx.close().catch(() => {}); mixCtx = null; mixDest = null; }
+}
+
+async function startRecording() {
+    const errDiv = document.getElementById('rec-error');
+    errDiv.style.display = 'none';
+    if (!recSupported) {
+        errDiv.textContent = 'Recording requires HTTPS and a microphone.';
+        errDiv.style.display = 'block';
+        return;
+    }
+    // If a preview stream is active, stop it cleanly before opening the
+    // recording stream (some devices refuse a second concurrent capture).
+    if (meterStream) {
+        stopMeter();
+        meterStream.getTracks().forEach(t => t.stop());
+        meterStream = null;
+        document.getElementById('rec-preview-btn').textContent = '▶ Test input';
+    }
+
+    const mode = document.getElementById('rec-mode').value;
+    const deviceId = document.getElementById('rec-device').value;
+    let captureStream;
+    try {
+        if (mode === 'mix') {
+            captureStream = await buildMixedStream(deviceId);
+        } else {
+            recStream = await navigator.mediaDevices.getUserMedia({
+                audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+            });
+            captureStream = recStream;
+        }
+    } catch (e) {
+        teardownStreams();  // release anything that did open
+        errDiv.textContent = (mode === 'mix' ? 'Aufnahme konnte nicht starten: ' : 'Microphone access denied or unavailable: ') + e.message;
+        errDiv.style.display = 'block';
+        return;
+    }
+    loadDevices(true);  // labels are available now that permission was granted
+
+    // Verify we actually have a live audio track before recording.
+    const audioTracks = captureStream.getAudioTracks();
+    if (!audioTracks.length || audioTracks[0].readyState === 'ended') {
+        teardownStreams();
+        errDiv.textContent = 'Kein aktives Audiosignal vom gewählten Gerät. Anderes Mikrofon wählen oder "Detect" drücken.';
+        errDiv.style.display = 'block';
+        return;
+    }
+
+    const mime = pickMime();
+    recChunks = [];
+    // Create the recorder defensively — Safari rejects unsupported mime types.
+    try {
+        mediaRecorder = mime ? new MediaRecorder(captureStream, { mimeType: mime })
+                             : new MediaRecorder(captureStream);
+    } catch (e1) {
+        try { mediaRecorder = new MediaRecorder(captureStream); }  // retry with browser default
+        catch (e2) {
+            teardownStreams();
+            errDiv.textContent = 'Aufnahme wird von diesem Browser nicht unterstützt: ' + e2.message;
+            errDiv.style.display = 'block';
+            return;
+        }
+    }
+    mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+    mediaRecorder.onstop = uploadRecording;
+    mediaRecorder.onerror = (ev) => {
+        const msg = (ev && ev.error && (ev.error.message || ev.error.name)) || 'unbekannter Aufnahmefehler';
+        console.error('MediaRecorder error:', ev);
+        errDiv.textContent = 'Aufnahme-Fehler: ' + msg;
+        errDiv.style.display = 'block';
+    };
+    try {
+        mediaRecorder.start(1000);  // 1s timeslice → flush chunks periodically (robust across browsers)
+    } catch (e) {
+        teardownStreams();
+        errDiv.textContent = 'Aufnahme konnte nicht starten: ' + e.message;
+        errDiv.style.display = 'block';
+        return;
+    }
+
+    // Level meter runs on an ISOLATED CLONE of the audio track, so Web Audio
+    // never touches the stream MediaRecorder is reading (sharing one stream
+    // breaks recording in Safari). If cloning/metering fails, recording is
+    // unaffected.
+    try {
+        recMeterClone = new MediaStream(audioTracks.map(t => t.clone()));
+        startMeter(recMeterClone);
+    } catch (e) {
+        console.warn('Level meter unavailable:', e);
+    }
+
+    document.getElementById('rec-start-btn').style.display = 'none';
+    document.getElementById('rec-stop-btn').style.display = '';
+    document.getElementById('rec-timer').style.display = '';
+    document.getElementById('rec-device').disabled = true;
+    document.getElementById('rec-mode').disabled = true;
+    document.getElementById('rec-preview-btn').disabled = true;
+    recStartTime = Date.now();
+    recTimerInterval = setInterval(updateTimer, 1000);
+    updateTimer();
+}
+
+function stopRecording() {
+    const btn = document.getElementById('rec-stop-btn');
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    clearInterval(recTimerInterval);
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();  // triggers uploadRecording via onstop
+    }
+}
+
+async function uploadRecording() {
+    const btn = document.getElementById('rec-stop-btn');
+    const errDiv = document.getElementById('rec-error');
+    teardownStreams();  // stop mic + display streams + close mix context
+
+    const type = (mediaRecorder && mediaRecorder.mimeType) || (recChunks[0] && recChunks[0].type) || 'audio/webm';
+    const ext = type.includes('mp4') ? 'mp4' : (type.includes('ogg') ? 'ogg' : 'webm');
+    const blob = new Blob(recChunks, { type });
+    if (!blob.size) {
+        errDiv.textContent = 'No audio captured.';
+        errDiv.style.display = 'block';
+        resetRecUI();
+        return;
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const form = new FormData();
+    form.set('file', blob, `recording_${ts}.${ext}`);
+    form.set('language', document.getElementById('rec-language').value);
+    form.set('diarization_enabled', document.getElementById('rec-diarization').checked.toString());
+    form.set('summarization_enabled', document.getElementById('rec-summarization').checked.toString());
+
+    btn.textContent = 'Uploading…';
+    try {
+        const resp = await fetch('/api/jobs', { method: 'POST', body: form });
+        if (!resp.ok) {
+            const e = await resp.json();
+            throw new Error(e.detail || 'Upload failed');
+        }
+        const job = await resp.json();
+        window.location.href = '/jobs/' + job.id;
+    } catch (e) {
+        errDiv.textContent = e.message;
+        errDiv.style.display = 'block';
+        resetRecUI();
+    }
+}
+
+function resetRecUI() {
+    const btn = document.getElementById('rec-stop-btn');
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+    btn.innerHTML = '<span class="stop-icon"></span> Stop &amp; Transcribe';
+    document.getElementById('rec-start-btn').style.display = '';
+    document.getElementById('rec-stop-btn').style.display = 'none';
+    document.getElementById('rec-timer').style.display = 'none';
+    document.getElementById('rec-device').disabled = false;
+    document.getElementById('rec-mode').disabled = false;
+    document.getElementById('rec-preview-btn').disabled = false;
+}
+
+// ── Reprocess existing files ──────────────────────────────────────
+(async function loadUploads() {
+    try {
+        const resp = await fetch('/api/jobs/uploads');
+        const data = await resp.json();
+        const list = document.getElementById('reprocess-list');
+        if (!data.uploads.length) {
+            list.innerHTML = '<small>No files on server yet.</small>';
+            return;
+        }
+        let html = '<table role="grid"><thead><tr><th>File</th><th>Size</th><th></th></tr></thead><tbody>';
+        for (const u of data.uploads) {
+            html += `<tr id="upload-row-${u.source_job_id}">
+                <td>${u.filename}</td>
+                <td>${u.file_size_mb} MB</td>
+                <td style="white-space:nowrap">
+                    <button class="outline" style="padding:0.2rem 0.6rem;font-size:0.85rem;margin:0" onclick="selectReprocess('${u.source_job_id}','${u.filename}',${u.file_size_mb},${u.has_transcript})">Reprocess</button>
+                    <button class="outline secondary" style="padding:0.2rem 0.6rem;font-size:0.85rem;margin:0" onclick="deleteUpload('${u.source_job_id}','${u.filename}',this)">Delete</button>
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        list.innerHTML = html;
+    } catch (e) {
+        console.error('Failed to load uploads:', e);
+    }
+})();
+
+async function deleteUpload(jobId, filename, btn) {
+    if (!confirm(`Delete "${filename}" and all its jobs?`)) return;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    try {
+        const resp = await fetch('/api/jobs/' + jobId, { method: 'DELETE' });
+        if (resp.ok) {
+            document.getElementById('upload-row-' + jobId)?.remove();
+            // Hide reprocess form if this file was selected
+            const hidden = document.getElementById('rp-source-job');
+            if (hidden && hidden.value === jobId) {
+                document.getElementById('reprocess-form').style.display = 'none';
+            }
+        }
+    } catch (e) {
+        console.error('Delete failed:', e);
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+    }
+}
+
+function selectReprocess(jobId, filename, sizeMb, hasTranscript) {
+    document.getElementById('rp-source-job').value = jobId;
+    document.getElementById('rp-filename').innerHTML = `<strong>${filename}</strong> (${sizeMb} MB)`;
+    document.getElementById('reprocess-form').style.display = 'block';
+
+    // Show/hide cache hint based on whether a transcript is available
+    const hint = document.getElementById('rp-cache-hint');
+    const retranscribeCheckbox = document.getElementById('rp-retranscribe');
+    if (hasTranscript) {
+        hint.textContent = 'Unchecked: uses cached transcript, only re-summarizes (much faster)';
+        retranscribeCheckbox.checked = false;
+        retranscribeCheckbox.disabled = false;
+    } else {
+        hint.textContent = 'No cached transcript available — full transcription will run';
+        retranscribeCheckbox.checked = true;
+        retranscribeCheckbox.disabled = true;
+    }
+}
+
+async function submitReprocess() {
+    const btn = document.getElementById('rp-btn');
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.textContent = 'Starting...';
+
+    const form = new FormData();
+    form.set('source_job_id', document.getElementById('rp-source-job').value);
+    form.set('language', document.getElementById('rp-language').value);
+    form.set('diarization_enabled', document.getElementById('rp-diarization').checked.toString());
+    form.set('summarization_enabled', document.getElementById('rp-summarization').checked.toString());
+    form.set('summary_detail', document.getElementById('rp-summary-detail').value);
+    form.set('retranscribe', document.getElementById('rp-retranscribe').checked.toString());
+
+    try {
+        const resp = await fetch('/api/jobs/reprocess', { method: 'POST', body: form });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Reprocess failed');
+        }
+        const job = await resp.json();
+        window.location.href = '/jobs/' + job.id;
+    } catch (e) {
+        btn.textContent = 'Error: ' + e.message;
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+    }
+}
+
+async function cleanupJobs(btn) {
+    if (!confirm('Delete all failed jobs and their files?')) return;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    try {
+        const resp = await fetch('/api/jobs/cleanup', { method: 'DELETE' });
+        const data = await resp.json();
+        btn.textContent = `Deleted ${data.deleted_jobs} jobs (${data.freed_mb} MB)`;
+        setTimeout(() => {
+            btn.textContent = 'Clean Up Failed';
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+        }, 3000);
+    } catch (e) {
+        btn.textContent = 'Error';
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+    }
+}
+
+// ── Upload ─────────────────────────────────────────────────────────
+document.getElementById('upload-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = document.getElementById('upload-btn');
+    const errorDiv = document.getElementById('upload-error');
+    errorDiv.style.display = 'none';
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    btn.textContent = 'Uploading...';
+
+    const data = new FormData(form);
+    if (!data.get('diarization_enabled')) data.set('diarization_enabled', 'false');
+    if (!data.get('summarization_enabled')) data.set('summarization_enabled', 'false');
+
+    try {
+        const resp = await fetch('/api/jobs', { method: 'POST', body: data });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Upload failed');
+        }
+        const job = await resp.json();
+        window.location.href = '/jobs/' + job.id;
+    } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.style.display = 'block';
+    } finally {
+        btn.removeAttribute('aria-busy');
+        btn.disabled = false;
+        btn.textContent = 'Start Transcription';
+    }
+});
+</script>
+
+{% endblock %}

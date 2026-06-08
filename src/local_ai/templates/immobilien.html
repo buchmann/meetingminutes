@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Immobilien — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Immobilien · Abrechnungs-Check</h2>
+        <small>
+            Prüfe die WEG-/Hausgeldabrechnung deiner Hausverwaltung: was ist formal/gesetzlich ok,
+            stimmen die Summen, und welche Kosten sind <strong>umlagefähig</strong> auf den Mieter
+            (§ 2 BetrKV). <em>Assistenz-Werkzeug, keine Rechtsberatung.</em>
+        </small>
+    </header>
+
+    <div class="grid">
+        <label>Wohnung (optional)
+            <select id="immo-unit">
+                <option value="">— ohne Zuordnung —</option>
+                {% for u in units %}
+                <option value="{{ u.id }}">{{ u.label }}{% if u.tenant_name %} · {{ u.tenant_name }}{% endif %}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>HV-Abrechnung (PDF/Word/Text)
+            <input id="immo-file" type="file" accept=".pdf,.docx,.txt,.md">
+        </label>
+    </div>
+    <button id="immo-extract-btn" onclick="immoExtract()">Abrechnung einlesen</button>
+    <div id="immo-status" style="display:none;margin-top:0.8rem"></div>
+
+    <!-- Editierbare Positionstabelle -->
+    <div id="immo-positions" style="display:none;margin-top:1rem">
+        <h4>Positionen <small style="color:var(--muted-color,#888)">(prüfen/korrigieren, dann „Prüfen")</small></h4>
+        <div style="overflow-x:auto">
+            <table>
+                <thead><tr>
+                    <th>Bezeichnung</th><th style="width:7rem">Anteil €</th>
+                    <th>Schlüssel</th><th style="width:6rem">umlagefähig</th><th></th>
+                </tr></thead>
+                <tbody id="immo-pos-body"></tbody>
+            </table>
+        </div>
+        <button class="outline secondary" style="padding:0.3rem 0.8rem;font-size:0.85rem" onclick="immoAddRow()">+ Zeile</button>
+        <button id="immo-check-btn" onclick="immoCheck()" style="margin-left:0.5rem">Prüfen &amp; umlagefähige Kosten ermitteln</button>
+    </div>
+
+    <!-- Befund-Report -->
+    <div id="immo-report" style="display:none;margin-top:1.2rem"></div>
+</article>
+
+<details>
+    <summary style="cursor:pointer"><strong>Stammdaten · Objekte &amp; Wohnungen</strong></summary>
+    <article style="margin-top:0.5rem">
+        <h4>Objekte</h4>
+        <div id="immo-obj-list">
+            {% if objects %}
+            <table><tbody>
+            {% for o in objects %}
+            <tr data-id="{{ o.id }}">
+                <td><strong>{{ o.name }}</strong>{% if o.address %} · {{ o.address }}{% endif %}
+                    {% if o.hausverwaltung %}<br><small style="color:var(--muted-color,#888)">HV: {{ o.hausverwaltung }}</small>{% endif %}</td>
+                <td style="text-align:right"><button class="outline secondary" style="margin:0;padding:0.2rem 0.6rem;font-size:0.8rem" onclick="immoDelObject('{{ o.id }}',this)">Löschen</button></td>
+            </tr>
+            {% endfor %}
+            </tbody></table>
+            {% else %}<p><small>Noch keine Objekte.</small></p>{% endif %}
+        </div>
+        <div class="grid">
+            <input id="obj-name" placeholder="Objektname *">
+            <input id="obj-address" placeholder="Adresse">
+            <input id="obj-hv" placeholder="Hausverwaltung">
+            <input id="obj-area" type="number" step="0.01" placeholder="Gesamtwohnfläche m²">
+        </div>
+        <button onclick="immoAddObject()" style="margin-top:0.3rem">Objekt hinzufügen</button>
+        <div id="obj-err" class="error-message" style="display:none;margin-top:0.4rem"></div>
+
+        <h4 style="margin-top:1.2rem">Wohnungen</h4>
+        <div id="immo-unit-list">
+            {% if units %}
+            <table><tbody>
+            {% for u in units %}
+            <tr data-id="{{ u.id }}">
+                <td><strong>{{ u.label }}</strong>
+                    <small style="color:var(--muted-color,#888)">
+                    {% if u.area %} · {{ u.area }} m²{% endif %}
+                    {% if u.tenant_name %} · Mieter: {{ u.tenant_name }}{% endif %}
+                    {% if u.tenant_prepayment %} · VZ {{ u.tenant_prepayment }} €/Mon{% endif %}</small></td>
+                <td style="text-align:right"><button class="outline secondary" style="margin:0;padding:0.2rem 0.6rem;font-size:0.8rem" onclick="immoDelUnit('{{ u.id }}',this)">Löschen</button></td>
+            </tr>
+            {% endfor %}
+            </tbody></table>
+            {% else %}<p><small>Noch keine Wohnungen.</small></p>{% endif %}
+        </div>
+        <div class="grid">
+            <select id="unit-object">
+                <option value="">Objekt wählen *</option>
+                {% for o in objects %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}
+            </select>
+            <input id="unit-label" placeholder="Bezeichnung * (z.B. Whg 2 OG)">
+            <input id="unit-area" type="number" step="0.01" placeholder="Wohnfläche m²">
+            <input id="unit-mea" placeholder="MEA z.B. 85/1000">
+        </div>
+        <div class="grid">
+            <input id="unit-persons" type="number" placeholder="Personen">
+            <input id="unit-tenant" placeholder="Mietername">
+            <input id="unit-prepay" type="number" step="0.01" placeholder="NK-Vorauszahlung €/Monat">
+            <select id="unit-key">
+                <option value="flaeche">Schlüssel: Wohnfläche</option>
+                <option value="personen">Schlüssel: Personen</option>
+                <option value="einheiten">Schlüssel: Einheiten</option>
+                <option value="verbrauch">Schlüssel: Verbrauch</option>
+            </select>
+        </div>
+        <button onclick="immoAddUnit()" style="margin-top:0.3rem">Wohnung hinzufügen</button>
+        <div id="unit-err" class="error-message" style="display:none;margin-top:0.4rem"></div>
+    </article>
+</details>
+
+<script>
+function esc(t){const d=document.createElement('div');d.textContent=t==null?'':t;return d.innerHTML;}
+let immoExtracted = null;   // last extraction meta
+
+function immoSetStatus(msg, isErr){
+    const s=document.getElementById('immo-status');
+    s.style.display='block'; s.className=isErr?'error-message':'';
+    s.style.color=isErr?'':'var(--muted-color,#888)';
+    s.innerHTML=msg;
+}
+
+async function immoExtract(){
+    const f=document.getElementById('immo-file').files[0];
+    if(!f){ immoSetStatus('Bitte eine Datei wählen.', true); return; }
+    const btn=document.getElementById('immo-extract-btn');
+    btn.disabled=true; btn.setAttribute('aria-busy','true'); btn.textContent='Lese ein…';
+    immoSetStatus('<span aria-busy="true">PDF wird gelesen und vom LLM extrahiert… (~20–40 s)</span>');
+    document.getElementById('immo-positions').style.display='none';
+    document.getElementById('immo-report').style.display='none';
+    try{
+        const fd=new FormData(); fd.set('file', f);
+        const r=await fetch('/api/immo/extract',{method:'POST',body:fd});
+        const d=await r.json();
+        if(!r.ok) throw new Error(d.detail||d.error||('Fehler '+r.status));
+        immoExtracted=d.extracted;
+        renderPositions(d.extracted);
+        const m=d.extracted;
+        immoSetStatus(`Zeitraum: ${esc(m.zeitraum_von||'?')} – ${esc(m.zeitraum_bis||'?')} · `
+            +`${(m.positionen||[]).length} Positionen erkannt. Bitte prüfen, dann „Prüfen".`);
+    }catch(e){ immoSetStatus(e.message, true); }
+    finally{ btn.disabled=false; btn.removeAttribute('aria-busy'); btn.textContent='Abrechnung einlesen'; }
+}
+
+function posRow(p){
+    p=p||{bezeichnung:'',anteil:0,schluessel:'',umlagefaehig:false};
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+        <td><input class="p-bez" value="${esc(p.bezeichnung)}" style="margin:0"></td>
+        <td><input class="p-anteil" type="number" step="0.01" value="${p.anteil!=null?p.anteil:''}" style="margin:0"></td>
+        <td><input class="p-schl" value="${esc(p.schluessel||'')}" style="margin:0"></td>
+        <td style="text-align:center"><input class="p-uml" type="checkbox" ${p.umlagefaehig?'checked':''} style="margin:0"></td>
+        <td style="text-align:right"><button class="outline secondary" style="margin:0;padding:0.1rem 0.5rem" onclick="this.closest('tr').remove()">×</button></td>`;
+    return tr;
+}
+function renderPositions(ex){
+    const body=document.getElementById('immo-pos-body');
+    body.innerHTML='';
+    (ex.positionen||[]).forEach(p=>body.appendChild(posRow(p)));
+    document.getElementById('immo-positions').style.display='block';
+}
+function immoAddRow(){ document.getElementById('immo-pos-body').appendChild(posRow()); }
+
+function collectPositions(){
+    const rows=[...document.querySelectorAll('#immo-pos-body tr')];
+    return rows.map(tr=>({
+        bezeichnung: tr.querySelector('.p-bez').value,
+        anteil: parseFloat(tr.querySelector('.p-anteil').value)||0,
+        schluessel: tr.querySelector('.p-schl').value,
+        umlagefaehig: tr.querySelector('.p-uml').checked,
+        kategorie:'', gesamt:null, begruendung:''
+    }));
+}
+
+const SEV={ok:['#2e7d32','✓'],info:['#1e88e5','ℹ'],warn:['#fb8c00','⚠'],error:['#e53935','✗']};
+async function immoCheck(){
+    const btn=document.getElementById('immo-check-btn');
+    btn.disabled=true; btn.setAttribute('aria-busy','true');
+    const extracted=Object.assign({}, immoExtracted||{}, {positionen: collectPositions()});
+    try{
+        const r=await fetch('/api/immo/check',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({extracted, unit_id:document.getElementById('immo-unit').value})});
+        const d=await r.json();
+        if(!r.ok) throw new Error(d.detail||d.error||('Fehler '+r.status));
+        renderReport(d);
+    }catch(e){ immoSetStatus(e.message, true); }
+    finally{ btn.disabled=false; btn.removeAttribute('aria-busy'); }
+}
+
+function renderReport(d){
+    const rep=document.getElementById('immo-report');
+    let h=`<h4>Befund</h4><p style="color:var(--muted-color,#888)">${esc(d.summary)}</p>`;
+    h+=d.findings.map(f=>{
+        const [c,ic]=SEV[f.severity]||SEV.info;
+        return `<div style="display:flex;gap:0.5rem;padding:0.4rem 0;border-bottom:1px solid var(--muted-border-color,#eee)">
+            <span style="color:${c};font-weight:bold">${ic}</span>
+            <div><strong>${esc(f.title)}</strong><div style="font-size:0.9rem">${esc(f.detail)}</div></div></div>`;
+    }).join('');
+    h+=`<div style="margin-top:1rem;padding:0.8rem 1rem;background:rgba(46,125,50,0.08);border-left:3px solid #2e7d32;border-radius:0.3rem">
+        <strong>Umlagefähig auf den Mieter: ${d.apportionable_total.toFixed(2)} €</strong>
+        <ul style="margin:0.4rem 0 0">${d.apportionable.map(p=>`<li>${esc(p.bezeichnung)} — ${(p.anteil||0).toFixed(2)} €</li>`).join('')}</ul></div>`;
+    if(d.non_apportionable.length){
+        h+=`<div style="margin-top:0.6rem;font-size:0.9rem;color:var(--muted-color,#888)"><strong>Nicht umlagefähig (Eigentümer trägt selbst):</strong> `
+            +d.non_apportionable.map(p=>esc(p.bezeichnung)+' ('+(p.anteil||0).toFixed(2)+' €)').join(', ')+'</div>';
+    }
+    rep.innerHTML=h; rep.style.display='block';
+    rep.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// ── Stammdaten ──
+async function immoAddObject(){
+    const err=document.getElementById('obj-err'); err.style.display='none';
+    const body={name:document.getElementById('obj-name').value,address:document.getElementById('obj-address').value,
+        hausverwaltung:document.getElementById('obj-hv').value,total_area:document.getElementById('obj-area').value};
+    if(!body.name.trim()){ err.textContent='Name erforderlich.'; err.style.display='block'; return; }
+    const r=await fetch('/api/immo/objects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok) location.reload(); else { const d=await r.json(); err.textContent=d.error||d.detail||'Fehler'; err.style.display='block'; }
+}
+async function immoDelObject(id,btn){ if(!confirm('Objekt + zugehörige Wohnungen löschen?'))return; btn.disabled=true;
+    const r=await fetch('/api/immo/objects/'+id,{method:'DELETE'}); if(r.ok) location.reload(); else btn.disabled=false; }
+async function immoAddUnit(){
+    const err=document.getElementById('unit-err'); err.style.display='none';
+    const body={object_id:document.getElementById('unit-object').value,label:document.getElementById('unit-label').value,
+        area:document.getElementById('unit-area').value,mea:document.getElementById('unit-mea').value,
+        persons:document.getElementById('unit-persons').value,tenant_name:document.getElementById('unit-tenant').value,
+        tenant_prepayment:document.getElementById('unit-prepay').value,umlage_key:document.getElementById('unit-key').value};
+    if(!body.object_id){ err.textContent='Objekt wählen.'; err.style.display='block'; return; }
+    if(!body.label.trim()){ err.textContent='Bezeichnung erforderlich.'; err.style.display='block'; return; }
+    const r=await fetch('/api/immo/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok) location.reload(); else { const d=await r.json(); err.textContent=d.error||d.detail||'Fehler'; err.style.display='block'; }
+}
+async function immoDelUnit(id,btn){ if(!confirm('Wohnung löschen?'))return; btn.disabled=true;
+    const r=await fetch('/api/immo/units/'+id,{method:'DELETE'}); if(r.ok) location.reload(); else btn.disabled=false; }
+</script>
+
+{% endblock %}

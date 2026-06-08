@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}local-ai - Users{% endblock %}
+{% block content %}
+
+<a href="/">&larr; Back to Home</a>
+
+<article>
+    <header><h2>User Management</h2></header>
+
+    {% if error %}<p class="error-message" style="display:block">{{ error }}</p>{% endif %}
+    {% if notice %}<p style="color:var(--pico-ins-color,#2d6a4f)">{{ notice }}</p>{% endif %}
+
+    <figure>
+    <table>
+        <thead>
+            <tr><th>Username</th><th>Role</th><th>Created</th><th>Reset password</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td>{{ u.username }}</td>
+                <td>{% if u.is_admin %}<strong>admin</strong>{% else %}user{% endif %}</td>
+                <td>{{ u.created_at[:16] | replace('T', ' ') }}</td>
+                <td>
+                    <form method="post" action="/admin/users/{{ u.id }}/password" style="margin:0;display:flex;gap:0.4rem">
+                        <input type="password" name="password" placeholder="New password" required style="margin:0">
+                        <button class="outline small" style="margin:0;white-space:nowrap">Reset</button>
+                    </form>
+                </td>
+                <td>
+                    {% if u.id != user.id %}
+                    <form method="post" action="/admin/users/{{ u.id }}/delete" style="margin:0"
+                          onsubmit="return confirm('Delete {{ u.username }} and all their transcriptions?')">
+                        <button class="outline secondary small" style="margin:0">Delete</button>
+                    </form>
+                    {% else %}
+                    <small style="opacity:0.6">you</small>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+</article>
+
+<article>
+    <header><h3>Create User</h3></header>
+    <form method="post" action="/admin/users">
+        <div class="grid">
+            <label>Username<input type="text" name="new_username" required></label>
+            <label>Password<input type="password" name="new_password" required></label>
+        </div>
+        <label>
+            <input type="checkbox" name="is_admin" value="true">
+            Administrator (can manage users)
+        </label>
+        <button type="submit">Create User</button>
+    </form>
+</article>
+
+{% endblock %}

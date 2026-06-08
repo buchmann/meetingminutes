@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}local-ai{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/static/css/app.css">
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+    <header class="container">
+        <nav>
+            <ul>
+                <li><a href="/search"><strong>local-ai</strong></a></li>
+            </ul>
+            {% if user %}
+            <ul class="nav-menu">
+                <li>
+                    <details class="dropdown">
+                        <summary class="secondary"><small>Meetings</small></summary>
+                        <ul dir="rtl">
+                            <li><a href="/meetings">Meetings</a></li>
+                        </ul>
+                    </details>
+                </li>
+                <li>
+                    <details class="dropdown">
+                        <summary class="secondary"><small>Textfunctions</small></summary>
+                        <ul dir="rtl">
+                            <li><a href="/chat">Text Improver</a></li>
+                            <li><a href="/documents">Document Checker</a></li>
+                            <li><a href="/translate">Translator</a></li>
+                            <li><a href="/consolidate">Consolidator</a></li>
+                        </ul>
+                    </details>
+                </li>
+                <li>
+                    <details class="dropdown">
+                        <summary class="secondary"><small>PA</small></summary>
+                        <ul dir="rtl">
+                            <li><a href="/search">Web Search</a></li>
+                            <li><a href="/notes">Notes &amp; Manuals</a></li>
+                            <li><a href="/email">E-Mail</a></li>
+                            {% if user.profile and 'vermieter' in user.profile %}
+                            <li><a href="/immobilien">Immobilien</a></li>
+                            {% endif %}
+                        </ul>
+                    </details>
+                </li>
+                <li><a href="/projects" class="secondary"><small>Projects</small></a></li>
+                <li><a href="/system" class="secondary"><small>System</small></a></li>
+                <li><a href="/settings" class="secondary"><small>Settings</small></a></li>
+                {% if user.is_admin %}
+                <li><a href="/admin/users" class="secondary"><small>Users</small></a></li>
+                {% endif %}
+                <li><small style="opacity:0.7">{{ user.username }}</small></li>
+                <li>
+                    <form method="post" action="/logout" style="margin:0">
+                        <button class="secondary outline" style="margin:0;padding:0.2rem 0.7rem;font-size:0.8rem">Logout</button>
+                    </form>
+                </li>
+            </ul>
+            {% endif %}
+        </nav>
+    </header>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="container">
+        <small>local-ai v0.1.0 &mdash; All processing runs locally</small>
+    </footer>
+</body>
+</html>

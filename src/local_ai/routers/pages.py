@@ -136,10 +136,51 @@ async def system_page(request: Request, user: dict = Depends(require_user)):
 
 @router.get("/settings")
 async def settings_page(request: Request, user: dict = Depends(require_user)):
+    from local_ai.config import LLM_MODELS
     profile = user.get("style_profile")
+    settings = request.app.state.settings
     return request.app.state.templates.TemplateResponse(
-        request, "settings.html", {"profile": profile, "user": user}
+        request, "settings.html",
+        {
+            "profile": profile, "user": user,
+            "llm_models": LLM_MODELS,
+            "active_llm": getattr(settings, "active_llm", "gptoss"),
+        },
     )
+
+
+@router.post("/api/settings/model")
+async def switch_model(
+    request: Request,
+    model_key: str = Form(...),
+    user: dict = Depends(require_admin),
+):
+    """Switch the active LLM (admin only). Persists the choice, repoints the
+    app at the new model, and triggers the GPU-manager swap (≈3-5 min reload)."""
+    from local_ai.config import LLM_MODELS, apply_llm
+    import asyncio
+    from local_ai.services.pipeline import _activate_gpu_service
+
+    if model_key not in LLM_MODELS:
+        raise HTTPException(400, f"Unknown model '{model_key}'.")
+
+    db = request.app.state.db
+    settings = request.app.state.settings
+    await db.set_app_config("active_llm", model_key)
+    model = apply_llm(settings, model_key)
+    request.app.state.active_llm = model_key
+
+    # Kick off the GPU swap in the background (the model takes minutes to load).
+    if settings.gpu_manager_url:
+        asyncio.create_task(_activate_gpu_service(settings.gpu_manager_url, model["gpu_endpoint"]))
+
+    return {
+        "ok": True,
+        "model_key": model_key,
+        "label": model["label"],
+        "model": model["model"],
+        "loading": bool(settings.gpu_manager_url),
+    }
 
 
 @router.post("/api/profile/role")
@@ -169,6 +210,7 @@ async def job_detail(request: Request, job_id: str, user: dict = Depends(require
         )
     transcript = db.parse_transcript(job)
     summary = db.parse_summary(job)
+    projects = await db.list_projects(user["id"])
     return request.app.state.templates.TemplateResponse(
         request,
         "job_detail.html",
@@ -177,6 +219,7 @@ async def job_detail(request: Request, job_id: str, user: dict = Depends(require
             "job": job,
             "transcript": transcript,
             "summary": summary,
+            "projects": projects,
             "is_owner": job["user_id"] == user["id"],
         },
     )

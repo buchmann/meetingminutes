@@ -4,6 +4,51 @@
 
 <a href="/">&larr; Back to Home</a>
 
+{% if user.is_admin and llm_models %}
+<article>
+    <header>
+        <h2>Sprachmodell (LLM)</h2>
+        <small>Wählt das Modell für alle KI-Funktionen (Zusammenfassung, Textfunktionen, Selection-Analyse …).
+        Nur <strong>ein</strong> Modell passt gleichzeitig in den GPU-Speicher — der Wechsel stößt einen
+        Modell-Reload an (~3–5 Min). Betrifft alle Nutzer.</small>
+    </header>
+    <div id="llm-options" style="display:flex;flex-direction:column;gap:0.5rem">
+        {% for key, m in llm_models.items() %}
+        <label class="llm-opt" style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.6rem 0.8rem;border:1px solid var(--pico-muted-border-color,#ccc);border-radius:0.5rem;cursor:pointer{% if key == active_llm %};border-color:var(--pico-primary,#1565c0);background:var(--pico-primary-background,rgba(21,101,192,0.06)){% endif %}">
+            <input type="radio" name="llm" value="{{ key }}" {% if key == active_llm %}checked{% endif %} style="margin-top:0.2rem">
+            <span style="flex:1">
+                <strong>{{ m.label }}</strong>
+                {% if key == active_llm %}<span class="tag" style="font-size:0.7em">active</span>{% endif %}
+                <br><small style="color:var(--muted-color,#888)">{{ m.detail }}</small>
+            </span>
+        </label>
+        {% endfor %}
+    </div>
+    <button id="llm-save-btn" onclick="switchModel()" style="margin-top:0.7rem">Modell anwenden</button>
+    <span id="llm-status" style="margin-left:0.6rem;font-size:0.9rem"></span>
+    <script>
+    async function switchModel(){
+        const sel=document.querySelector('input[name="llm"]:checked');
+        const st=document.getElementById('llm-status');
+        const btn=document.getElementById('llm-save-btn');
+        if(!sel) return;
+        btn.disabled=true; btn.setAttribute('aria-busy','true');
+        st.textContent='';
+        try{
+            const fd=new FormData(); fd.set('model_key', sel.value);
+            const r=await fetch('/api/settings/model',{method:'POST',body:fd});
+            const d=await r.json();
+            if(!r.ok||!d.ok) throw new Error(d.detail||'Fehler');
+            st.style.color='#2e7d32';
+            st.textContent='✓ Aktiv: '+d.label+(d.loading?' — Modell lädt (~3–5 Min), erste Anfrage danach.':'');
+            setTimeout(()=>location.reload(),1500);
+        }catch(e){ st.style.color='#d32f2f'; st.textContent='✕ '+e.message; }
+        finally{ btn.disabled=false; btn.removeAttribute('aria-busy'); }
+    }
+    </script>
+</article>
+{% endif %}
+
 <article>
     <header>
         <h2>Profil / Rollen</h2>

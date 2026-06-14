@@ -112,8 +112,10 @@
             <select name="summary_detail">
                 <option value="standard" selected>Standard</option>
                 <option value="detailed">Detailed (≈2× content)</option>
+                <option value="extensive">Extensive (≈4× + product &amp; project)</option>
+                <option value="exhaustive">Exhaustive (≈10× + steps &amp; questions)</option>
             </select>
-            <small style="color:var(--muted-color,#888)">"Detailed" produces twice as many topics, longer prose, and more sub-points. Takes longer to generate.</small>
+            <small style="color:var(--muted-color,#888)">"Detailed" ≈2×. "Extensive" ≈4× and adds dedicated <strong>Product Features</strong> + <strong>Project Work</strong> sections. "Exhaustive" ≈10× — maximal detail with step-by-step sub-points and exhaustive open questions. More depth takes (much) longer to generate.</small>
         </label>
         <details>
             <summary>Advanced Options</summary>
@@ -166,6 +168,8 @@
                 <select id="rp-summary-detail">
                     <option value="standard" selected>Standard</option>
                     <option value="detailed">Detailed (≈2× content)</option>
+                    <option value="extensive">Extensive (≈4× + product &amp; project)</option>
+                    <option value="exhaustive">Exhaustive (≈10× + steps &amp; questions)</option>
                 </select>
             </label>
             <div style="margin-bottom:1rem">

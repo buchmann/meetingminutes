@@ -9,6 +9,12 @@
         The Consolidator can send its output straight into a project.</small>
     </header>
 
+    <form method="get" action="/projects" role="search" style="display:flex;gap:0.5rem;margin:0.6rem 0">
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="Search projects and their documents…" style="margin:0">
+        <button type="submit" style="margin:0;width:auto">Search</button>
+        {% if q %}<a href="/projects" role="button" class="secondary outline" style="margin:0;white-space:nowrap">Clear</a>{% endif %}
+    </form>
+
     <details>
         <summary role="button" class="secondary">+ New project</summary>
         <form method="post" action="/api/projects" style="margin-top:0.8rem">
@@ -23,12 +29,14 @@
     </details>
 </article>
 
+{% if q %}<p><small>{{ projects|length }} project{{ '' if projects|length == 1 else 's' }} matching “{{ q }}”.</small></p>{% endif %}
+
 {% if projects %}
 <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))">
     {% for p in projects %}
     <article style="margin:0">
         <header style="margin-bottom:0.4rem">
-            <a href="/projects/{{ p.id }}"><strong>{{ p.name }}</strong></a>
+            <a href="/projects/{{ p.id }}{% if q %}?q={{ q | urlencode }}{% endif %}"><strong>{{ p.name }}</strong></a>
         </header>
         {% if p.description %}
         <small style="color:var(--muted-color,#888);display:block;margin-bottom:0.5rem">
@@ -36,12 +44,17 @@
         </small>
         {% endif %}
         <footer style="display:flex;justify-content:space-between;align-items:center">
-            <small><span class="tag">{{ p.doc_count }} doc{{ '' if p.doc_count == 1 else 's' }}</span></small>
-            <a href="/projects/{{ p.id }}" role="button" class="outline secondary" style="padding:0.15rem 0.7rem;font-size:0.8rem">Open</a>
+            <small>
+                <span class="tag">{{ p.doc_count }} doc{{ '' if p.doc_count == 1 else 's' }}</span>
+                {% if q and p.match_count %}<span class="tag" style="background:#1565c0;color:#fff">{{ p.match_count }} match{{ '' if p.match_count == 1 else 'es' }}</span>{% endif %}
+            </small>
+            <a href="/projects/{{ p.id }}{% if q %}?q={{ q | urlencode }}{% endif %}" role="button" class="outline secondary" style="padding:0.15rem 0.7rem;font-size:0.8rem">Open</a>
         </footer>
     </article>
     {% endfor %}
 </div>
+{% elif q %}
+<p><small>No projects match “{{ q }}”. <a href="/projects">Show all</a></small></p>
 {% else %}
 <p><small>No projects yet — create your first one above.</small></p>
 {% endif %}

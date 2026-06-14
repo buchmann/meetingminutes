@@ -17,36 +17,52 @@ tracer = trace.get_tracer("local_ai.pipeline")
 
 
 async def _activate_gpu_service(gpu_manager_url: str, service: str) -> None:
-    """Call the GPU manager to swap GPU services (whisperx ↔ vLLM).
+    """Best-effort call to the GPU manager to swap GPU services (whisperx ↔ vLLM).
 
     The DGX Spark can only run one GPU-heavy service at a time.
     *service* can be "whisperx", "vllm", "vllm-small", or "vllm/{profile}".
+
+    This is an OPTIMISATION, not a hard requirement: with enough memory the
+    services coexist and stay loaded. So a failure here (manager down, stale
+    profile→container mapping, etc.) is logged as a warning and swallowed —
+    the subsequent transcribe/summarize call will surface any real problem
+    with a clearer error instead of failing the whole job on the swap.
     """
     if not gpu_manager_url:
         return
     url = f"{gpu_manager_url.rstrip('/')}/gpu/{service}"
     logger.info("GPU swap: activating %s via %s", service, url)
-    # vLLM models can take up to 600s to load; allow 900s total
-    async with httpx.AsyncClient(timeout=900.0) as client:
-        resp = await client.post(url)
-        resp.raise_for_status()
-        result = resp.json()
-        logger.info("GPU swap result: %s", result)
+    try:
+        # vLLM models can take up to 600s to load; allow 900s total
+        async with httpx.AsyncClient(timeout=900.0) as client:
+            resp = await client.post(url)
+            resp.raise_for_status()
+            result = resp.json()
+            logger.info("GPU swap result: %s", result)
+    except Exception as exc:
+        logger.warning(
+            "GPU swap for %s failed (continuing; model may already be loaded): %s",
+            service, exc,
+        )
 
 
 def _resolve_vllm_profile(settings) -> str:
-    """Determine the GPU manager endpoint for vLLM based on config."""
+    """Determine the GPU manager endpoint for the ACTIVE vLLM model."""
+    # The active model (set by config.apply_llm) carries its own GPU endpoint.
+    endpoint = getattr(settings, "vllm_gpu_endpoint", "")
+    if endpoint:
+        return endpoint
+    # Legacy fallbacks
     profile = getattr(settings, "vllm_profile", "auto")
     if profile == "large":
-        return "vllm"
+        return "vllm/large"
     if profile == "small":
         return "vllm-small"
-    # auto-detect from model name or port
     model = getattr(settings, "openai_model", "")
     base_url = getattr(settings, "openai_base_url", "")
     if "granite" in model.lower() or ":8001" in base_url:
         return "vllm-small"
-    return "vllm"
+    return "vllm/large"
 
 
 class Pipeline:

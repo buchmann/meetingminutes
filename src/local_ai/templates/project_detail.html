@@ -34,39 +34,89 @@
 </article>
 
 <article>
-    <header><strong>Documents</strong> <small style="color:var(--muted-color,#888)">({{ docs|length }})</small></header>
+    <header style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+        <strong>History</strong> <small style="color:var(--muted-color,#888)">({{ docs|length }} document{{ '' if docs|length == 1 else 's' }}, oldest first)</small>
+    </header>
 
+    <form role="search" onsubmit="searchDocs(event)" style="display:flex;gap:0.5rem;margin:0.4rem 0">
+        <input type="search" id="doc-search" value="{{ q or '' }}" placeholder="Search this project's documents…" style="margin:0">
+        <button type="submit" style="margin:0;width:auto">Search</button>
+        <button type="button" onclick="clearDocSearch()" class="secondary outline" style="margin:0;width:auto">Clear</button>
+    </form>
+
+    <div id="doc-search-results" style="display:none;margin:0.5rem 0"></div>
+
+    <div id="doc-timeline">
     {% if docs %}
-    <table>
-        <thead>
-            <tr><th>Title</th><th>Type</th><th>Source</th><th>Added</th><th>Download</th><th></th></tr>
-        </thead>
-        <tbody>
-            {% for d in docs %}
-            <tr>
-                <td>{{ d.title }}</td>
-                <td><span class="tag" style="font-size:0.75em">{{ doc_type_labels.get(d.doc_type, d.doc_type) }}</span></td>
-                <td><small>{{ d.source or '—' }}</small></td>
-                <td><small>{{ d.created_at[:10] }}</small></td>
-                <td>
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=docx"><small>docx</small></a> ·
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=pdf"><small>pdf</small></a> ·
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=md"><small>md</small></a> ·
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=txt"><small>txt</small></a>
-                </td>
-                <td>
-                    <form method="post" action="/api/projects/docs/{{ d.id }}/delete" style="margin:0"
+    <div class="proj-timeline">
+        {% for d in docs %}
+        <div class="proj-timeline-entry">
+            <div class="proj-timeline-date"><small>{{ d.created_at[:10] }}<br><span style="opacity:0.6">{{ d.created_at[11:16] }}</span></small></div>
+            <div class="proj-timeline-body">
+                <div>
+                    <strong>{{ d.title }}</strong>
+                    <span class="tag" style="font-size:0.7em">{{ doc_type_labels.get(d.doc_type, d.doc_type) }}</span>
+                    {% if d.source %}<small style="color:var(--muted-color,#888)"> · via {{ d.source }}</small>{% endif %}
+                </div>
+                <small>
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=docx">docx</a> ·
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=pdf">pdf</a> ·
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=md">md</a> ·
+                    <a href="/api/projects/docs/{{ d.id }}/download?format=txt">txt</a>
+                    <form method="post" action="/api/projects/docs/{{ d.id }}/delete" style="display:inline;margin-left:0.5rem"
                           onsubmit="return confirm('Delete this document?')">
-                        <button type="submit" class="secondary outline" style="margin:0;padding:0.1rem 0.5rem;font-size:0.75rem">✕</button>
+                        <button type="submit" class="secondary outline" style="margin:0;padding:0 0.4rem;font-size:0.7rem">✕</button>
                     </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+                </small>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
     {% else %}
-    <p><small>No documents yet. Add one below, or send Consolidator output here.</small></p>
+    <p><small>No documents yet. Add one below, send Consolidator output here, or save meeting minutes from a meeting.</small></p>
     {% endif %}
+    </div>
+
+    <script>
+        const PROJECT_ID = "{{ project.id }}";
+        async function searchDocs(e) {
+            if (e) e.preventDefault();
+            const q = document.getElementById('doc-search').value.trim();
+            const results = document.getElementById('doc-search-results');
+            const timeline = document.getElementById('doc-timeline');
+            if (!q) { clearDocSearch(); return; }
+            results.style.display = 'block';
+            results.innerHTML = '<small aria-busy="true">Searching…</small>';
+            try {
+                const r = await fetch(`/api/projects/${PROJECT_ID}/search?q=` + encodeURIComponent(q));
+                const data = await r.json();
+                timeline.style.display = 'none';
+                if (!data.results.length) {
+                    results.innerHTML = `<small>No documents match “${q}”.</small>`;
+                    return;
+                }
+                let html = `<small style="color:var(--muted-color,#888)">${data.count} match${data.count===1?'':'es'} for “${q}”</small>`;
+                for (const d of data.results) {
+                    const snip = (d.snippet || '').replace(/</g,'&lt;');
+                    html += `<article style="margin:0.5rem 0;padding:0.6rem 0.8rem">
+                        <div><strong>${d.title}</strong> <span class="tag" style="font-size:0.7em">${d.doc_type}</span></div>
+                        <small style="color:var(--muted-color,#888)">${snip}</small><br>
+                        <small><a href="/api/projects/docs/${d.id}/download?format=md">open .md</a> · <a href="/api/projects/docs/${d.id}/download?format=docx">docx</a> · <a href="/api/projects/docs/${d.id}/download?format=pdf">pdf</a></small>
+                    </article>`;
+                }
+                results.innerHTML = html;
+            } catch (err) {
+                results.innerHTML = '<small>Search failed.</small>';
+            }
+        }
+        function clearDocSearch() {
+            document.getElementById('doc-search').value = '';
+            document.getElementById('doc-search-results').style.display = 'none';
+            document.getElementById('doc-timeline').style.display = 'block';
+        }
+        // Auto-run search if arriving with a ?q= from the projects list
+        if ("{{ q or '' }}".trim()) { searchDocs(); }
+    </script>
 
     <details style="margin-top:1rem">
         <summary role="button" class="secondary outline">+ Add document</summary>

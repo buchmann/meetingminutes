@@ -65,6 +65,14 @@ async def lifespan(app: FastAPI):
     # Seed an initial admin account on first run.
     await _seed_admin(settings, db)
 
+    # Apply the persisted active LLM choice (default gpt-oss-120b) to settings,
+    # so every LLM feature routes to the chosen model + GPU profile.
+    from local_ai.config import DEFAULT_LLM, apply_llm
+    active = await db.get_app_config("active_llm", DEFAULT_LLM)
+    model = apply_llm(settings, active)
+    app.state.active_llm = settings.active_llm
+    logger.info("Active LLM: %s (%s) at %s", settings.active_llm, model["model"], settings.openai_base_url)
+
     app.state.pipeline = Pipeline(settings, db)
     app.state.recorder = Recorder(output_dir=settings.data_dir / "recordings")
 

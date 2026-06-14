@@ -50,7 +50,7 @@ async def create_job(
 
     diarization_on = diarization_enabled.lower() in ("true", "on", "1", "yes")
     summarization_on = summarization_enabled.lower() in ("true", "on", "1", "yes")
-    summary_detail = summary_detail.lower() if summary_detail.lower() in ("standard", "detailed") else "standard"
+    summary_detail = summary_detail.lower() if summary_detail.lower() in ("standard", "detailed", "extensive", "exhaustive") else "standard"
     min_spk = int(min_speakers) if min_speakers.strip() else None
     max_spk = int(max_speakers) if max_speakers.strip() else None
 
@@ -155,7 +155,7 @@ async def reprocess_upload(
 
     diarization_on = diarization_enabled.lower() in ("true", "on", "1", "yes")
     summarization_on = summarization_enabled.lower() in ("true", "on", "1", "yes")
-    summary_detail = summary_detail.lower() if summary_detail.lower() in ("standard", "detailed") else "standard"
+    summary_detail = summary_detail.lower() if summary_detail.lower() in ("standard", "detailed", "extensive", "exhaustive") else "standard"
     retranscribe_on = retranscribe.lower() in ("true", "on", "1", "yes")
     min_spk = int(min_speakers) if min_speakers.strip() else None
     max_spk = int(max_speakers) if max_speakers.strip() else None
@@ -314,7 +314,7 @@ async def resummarize_job(
     # If a detail level was supplied, persist it before kicking off the job.
     if summary_detail:
         detail = summary_detail.lower()
-        if detail in ("standard", "detailed"):
+        if detail in ("standard", "detailed", "extensive", "exhaustive"):
             await db.update_job(job_id, summary_detail=detail)
 
     await db.update_job(job_id, status="summarizing", progress_pct=85,
@@ -324,6 +324,125 @@ async def resummarize_job(
     asyncio.create_task(pipeline.resummarize_job(job_id))
 
     return {"ok": True, "job_id": job_id}
+
+
+def _summary_to_markdown(job: dict, summary: dict) -> str:
+    """Render a meeting's stored summary (dict) into Markdown meeting minutes."""
+    def _topic_block(items, heading):
+        out = [f"## {heading}"]
+        for it in items or []:
+            if isinstance(it, dict):
+                name = it.get("name", "")
+                status = f" _({it.get('status')})_" if it.get("status") else ""
+                out.append(f"### {name}{status}")
+                if it.get("summary"):
+                    out.append(it["summary"])
+                for sp in it.get("sub_points") or []:
+                    if isinstance(sp, dict):
+                        d = f" — {sp.get('detail')}" if sp.get("detail") else ""
+                        out.append(f"- **{sp.get('text','')}**{d}")
+                for r in it.get("remaining") or []:
+                    out.append(f"- _Remaining:_ {r}")
+            else:
+                out.append(f"- {it}")
+        return "\n\n".join(out)
+
+    md: list[str] = [f"# Meeting Minutes — {job.get('filename', 'Meeting')}"]
+    if job.get("created_at"):
+        md.append(f"_Recorded: {job['created_at'][:10]}_")
+    if summary.get("overall_summary"):
+        md.append("## Overview\n\n" + summary["overall_summary"])
+    if summary.get("participants"):
+        md.append("## Participants\n\n- " + "\n- ".join(map(str, summary["participants"])))
+    if summary.get("key_topics"):
+        md.append(_topic_block(summary["key_topics"], "Topics Discussed"))
+    if summary.get("action_items"):
+        lines = ["## Action Items"]
+        for a in summary["action_items"]:
+            if isinstance(a, dict):
+                extra = []
+                if a.get("assignee"):
+                    extra.append(f"assignee: {a['assignee']}")
+                if a.get("deadline"):
+                    extra.append(f"deadline: {a['deadline']}")
+                suffix = f" ({', '.join(extra)})" if extra else ""
+                lines.append(f"- {a.get('description','')}{suffix}")
+            else:
+                lines.append(f"- {a}")
+        md.append("\n".join(lines))
+    if summary.get("key_decisions"):
+        md.append("## Key Decisions\n\n- " + "\n- ".join(map(str, summary["key_decisions"])))
+    if summary.get("product_features"):
+        md.append(_topic_block(summary["product_features"], "Product Features"))
+    if summary.get("project_work"):
+        md.append(_topic_block(summary["project_work"], "Project Work"))
+    if summary.get("next_steps"):
+        md.append("## Next Steps\n\n- " + "\n- ".join(map(str, summary["next_steps"])))
+    if summary.get("open_questions"):
+        md.append("## Open Questions\n\n- " + "\n- ".join(map(str, summary["open_questions"])))
+    return "\n\n".join(md)
+
+
+@router.post("/jobs/{job_id}/to-project")
+async def job_to_project(
+    request: Request,
+    job_id: str,
+    project_id: str = Form(...),
+    user: dict = Depends(require_user),
+):
+    """Save a meeting's summary (minutes) into a project as a document."""
+    db = request.app.state.db
+    job = await _get_visible_job(db, job_id, user)
+    summary = db.parse_summary(job)
+    if not summary:
+        raise HTTPException(400, "This meeting has no summary yet.")
+
+    project = await db.get_project(project_id)
+    if not project or project.get("user_id") != user["id"]:
+        raise HTTPException(404, "Project not found.")
+
+    markdown = _summary_to_markdown(job, summary)
+    title = f"Minutes — {job.get('filename', 'Meeting')}"
+    await db.add_project_doc(
+        project_id=project_id, user_id=user["id"],
+        title=title, content=markdown,
+        doc_type="minutes", source="meeting", fmt="md",
+    )
+    return {"ok": True, "project_id": project_id, "project_name": project["name"]}
+
+
+@router.post("/jobs/{job_id}/summarize-selection")
+async def summarize_selection_endpoint(
+    request: Request,
+    job_id: str,
+    text: str = Form(...),
+    temperature: str = Form(default=""),
+    user: dict = Depends(require_user),
+):
+    """Summarize a selected transcript excerpt into two variants:
+    one keeping the concrete examples, one with all examples stripped."""
+    db = request.app.state.db
+    await _get_visible_job(db, job_id, user)  # access check
+    excerpt = (text or "").strip()
+    if len(excerpt) < 20:
+        raise HTTPException(400, "Select a longer passage (at least a sentence or two) to summarize.")
+
+    settings = request.app.state.settings
+    from local_ai.services.summarizer import clamp_temperature, summarize_selection
+    try:
+        result = await summarize_selection(
+            excerpt,
+            backend=settings.summary_backend,
+            openai_base_url=settings.openai_base_url,
+            openai_api_key=settings.openai_api_key,
+            openai_model=settings.openai_model,
+            ollama_base_url=settings.ollama_base_url,
+            ollama_model=settings.ollama_model,
+            temperature=clamp_temperature(temperature),
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Summarization failed: {exc}") from exc
+    return {"ok": True, **result, "chars": len(excerpt)}
 
 
 @router.get("/jobs/{job_id}/progress")
@@ -415,7 +534,7 @@ async def recording_stop(
 
     diarization_on = diarization_enabled.lower() in ("true", "on", "1", "yes")
     summarization_on = summarization_enabled.lower() in ("true", "on", "1", "yes")
-    summary_detail = summary_detail.lower() if summary_detail.lower() in ("standard", "detailed") else "standard"
+    summary_detail = summary_detail.lower() if summary_detail.lower() in ("standard", "detailed", "extensive", "exhaustive") else "standard"
 
     job_id = uuid.uuid4().hex[:12]
 

@@ -87,6 +87,8 @@ async def api_consolidate(
     job_ids: list[str] = Form(default=[]),  # noqa: B008
     use_summaries: str = Form(default="true"),
     project_id: str = Form(default=""),
+    pasted_text: str = Form(default=""),
+    pasted_title: str = Form(default=""),
     files: list[UploadFile] = Form(default=[]),  # noqa: B008
     user: dict = Depends(require_user),
 ):
@@ -128,9 +130,10 @@ async def api_consolidate(
     # Filter and clean optional fields
     job_ids = [j for j in (job_ids or []) if j and j.strip()]
     files = [f for f in (files or []) if f and getattr(f, "filename", None)]
+    pasted_text = (pasted_text or "").strip()
 
-    if not job_ids and not files:
-        raise HTTPException(400, "Select at least one job or upload at least one document.")
+    if not job_ids and not files and not pasted_text:
+        raise HTTPException(400, "Select at least one job, upload a document, or paste some text.")
 
     # Pull the selected jobs (only those owned by the user)
     sources: list[Source] = []
@@ -162,6 +165,15 @@ async def api_consolidate(
             transcript = db.parse_transcript(job)
             body = _render_transcript(transcript) if transcript else ""
             sources.append(Source(kind="transcript", title=job["filename"], body=body, meta=meta))
+
+    # Pasted text becomes its own source
+    if pasted_text:
+        sources.append(Source(
+            kind="document",
+            title=(pasted_title.strip() or "Pasted text"),
+            body=pasted_text,
+            meta=[f"Pasted text: {len(pasted_text)} chars"],
+        ))
 
     # Pull the uploaded files
     scratch_id = uuid.uuid4().hex[:12]
@@ -301,6 +313,18 @@ def _render_summary(summary: dict) -> str:
                             out.append(f"  - {sp.get('text','')} — {sp.get('detail','')}")
             else:
                 out.append(f"- {t}")
+    for section_key, heading in (("product_features", "Product features"), ("project_work", "Project work")):
+        items = summary.get(section_key)
+        if items:
+            out.append(f"### {heading}")
+            for it in items:
+                if isinstance(it, dict):
+                    out.append(f"**{it.get('name','')}**\n{it.get('summary','')}")
+                    for sp in it.get("sub_points") or []:
+                        if isinstance(sp, dict):
+                            out.append(f"  - {sp.get('text','')} — {sp.get('detail','')}")
+                else:
+                    out.append(f"- {it}")
     if summary.get("key_decisions"):
         out.append("### Key decisions\n- " + "\n- ".join(map(str, summary["key_decisions"])))
     if summary.get("action_items"):

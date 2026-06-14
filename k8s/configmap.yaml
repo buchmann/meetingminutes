@@ -12,13 +12,17 @@ data:
   LOCAL_AI_GPU_MANAGER_URL: "http://192.168.178.190:9090"
   LOCAL_AI_VLLM_PROFILE: "auto"
 
-  # Summarization: remote via DGX Spark vLLM
-  # Options:  large → port 8000, model "openai/gpt-oss-120b"
-  #           small → port 8001, model "ibm/granite-3-3-8b-instruct"
+  # Summarization: remote via DGX Spark vLLM.
+  # NOTE: the ACTIVE model is now switchable in Settings (admin) and persisted
+  # in the DB (app_config.active_llm, default "gptoss"); the app overrides the
+  # values below at startup via config.apply_llm. These are just the bootstrap
+  # default (gpt-oss-120b on the CUTLASS build).
+  #   gptoss  → port 8000, model "gpt-oss-120b"        (default)
+  #   granite → port 8001, model "ibm/granite-3-3-8b-instruct"
   LOCAL_AI_SUMMARY_BACKEND: "openai"
-  LOCAL_AI_OPENAI_BASE_URL: "http://192.168.178.190:8001/v1"
+  LOCAL_AI_OPENAI_BASE_URL: "http://192.168.178.190:8000/v1"
   LOCAL_AI_OPENAI_API_KEY: "none"
-  LOCAL_AI_OPENAI_MODEL: "ibm/granite-3-3-8b-instruct"
+  LOCAL_AI_OPENAI_MODEL: "gpt-oss-120b"
   # Embedding server (vLLM bge-m3 on the DGX) for semantic Notes search
   LOCAL_AI_EMBEDDING_BASE_URL: "http://192.168.178.190:8002/v1"
   LOCAL_AI_EMBEDDING_MODEL: "bge-m3"

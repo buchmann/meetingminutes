@@ -132,9 +132,38 @@ _DURATION_TIERS_DETAILED = {
 }
 
 
+# Extensive mode: roughly 4x the standard content (2x the "detailed" tier).
+# The most exhaustive level — used together with dedicated product-feature and
+# project-work sections for a maximally detailed record.
+_DURATION_TIERS_EXTENSIVE = {
+    "short": {"overall": "two rich paragraphs (8-14 sentences) covering setup, every theme raised, reasoning, and outcomes", "topics": "6-10", "topic_detail": "a full paragraph (8-12 sentences) covering context, what was discussed, the reasoning, concerns and alternatives, and outcomes", "timeline": "6-12", "sub_points": "include 3-6 detailed sub-points for every topic, each explaining context and reasoning"},
+    "medium": {"overall": "three to four full paragraphs (16-24 sentences) covering setup, every central theme, the discussion arc, decisions, disagreements, and outcomes", "topics": "12-20", "topic_detail": "a thorough multi-sentence paragraph (10-16 sentences) covering background, the full discussion, reasoning, every concern or alternative raised, trade-offs, and conclusions", "timeline": "16-30", "sub_points": "include 5-9 detailed sub-points per topic, each a full thought explaining context, reasoning, and implications"},
+    "long": {"overall": "four to six paragraphs (24-40 sentences) giving a comprehensive narrative of the entire session: setup, themes, every deep-dive, decisions, disagreements, and outcomes", "topics": "20-35", "topic_detail": "an exhaustive paragraph (14-22 sentences) covering background, the complete discussion, all reasoning, every concern, alternatives weighed, trade-offs, and conclusions", "timeline": "30-60", "sub_points": "include 6-12 detailed sub-points per topic, each a complete thought with context, reasoning, and implications"},
+}
+
+
+# Exhaustive mode: roughly 10x the standard content (~2.5x "extensive"). The
+# most thorough level possible within the model context — every topic, every
+# product feature with step-by-step sub-points, every project task, and every
+# open question enumerated in maximum detail.
+_DURATION_TIERS_EXHAUSTIVE = {
+    "short": {"overall": "three to four rich paragraphs (16-26 sentences) covering setup, every theme, all reasoning, disagreements and outcomes", "topics": "12-18", "topic_detail": "an exhaustive paragraph (14-20 sentences) covering full context, the complete discussion, all reasoning, every concern and alternative, trade-offs, and outcomes", "timeline": "12-24", "sub_points": "include 6-12 detailed step-by-step sub-points for every topic"},
+    "medium": {"overall": "five to seven full paragraphs (28-44 sentences) giving a complete narrative of the meeting: setup, every theme, the full discussion arc, all decisions, disagreements, and outcomes", "topics": "25-40", "topic_detail": "an exhaustive multi-paragraph treatment (18-28 sentences) covering background, the complete discussion verbatim in substance, all reasoning, every concern, alternative and trade-off, and conclusions", "timeline": "30-60", "sub_points": "include 10-18 detailed step-by-step sub-points per topic"},
+    "long": {"overall": "eight to twelve paragraphs (48-80 sentences) — a comprehensive minute-by-minute narrative of the entire session", "topics": "40-70", "topic_detail": "an exhaustive treatment (24-36 sentences) capturing the complete discussion, all reasoning, every concern, alternative, trade-off and conclusion in full", "timeline": "60-120", "sub_points": "include 12-24 detailed step-by-step sub-points per topic"},
+}
+
+
 def _get_tier(duration_secs: float, detail_level: str = "standard") -> dict:
-    """Return the tier dict for the given duration. detail_level='detailed' doubles content."""
-    pool = _DURATION_TIERS_DETAILED if detail_level == "detailed" else _DURATION_TIERS
+    """Return the tier dict for the given duration.
+    detail_level: 'detailed' ≈2x, 'extensive' ≈4x, 'exhaustive' ≈10x content."""
+    if detail_level == "exhaustive":
+        pool = _DURATION_TIERS_EXHAUSTIVE
+    elif detail_level == "extensive":
+        pool = _DURATION_TIERS_EXTENSIVE
+    elif detail_level == "detailed":
+        pool = _DURATION_TIERS_DETAILED
+    else:
+        pool = _DURATION_TIERS
     if duration_secs < 300:  # < 5 min
         return pool["short"]
     elif duration_secs < 1800:  # < 30 min
@@ -143,7 +172,39 @@ def _get_tier(duration_secs: float, detail_level: str = "standard") -> dict:
         return pool["long"]
 
 
-def _build_prompt_en(tier: dict, duration_mins: int) -> str:
+_EXTENSIVE_FIELDS_EN = """,
+  "product_features": [
+    {"name": "Feature or capability name", "summary": "As much detail as the transcript supports: what the feature does, the problem it solves, requirements and acceptance criteria mentioned, dependencies, edge cases, and any open design questions.", "sub_points": [{"text": "Specific requirement, behaviour, or sub-feature", "detail": "1-3 sentences with specifics."}], "status": "proposed | in_progress | done"}
+  ],
+  "project_work": [
+    {"name": "Workstream, task, or deliverable", "summary": "As much detail as the transcript supports: scope, the work to be done, approach, blockers, risks, estimates, and dependencies on other work or people.", "sub_points": [{"text": "Concrete task or step", "detail": "1-3 sentences: who, what, status."}], "status": "not_started | in_progress | blocked | done", "remaining": ["Concrete remaining item"]}
+  ]"""
+
+_EXTENSIVE_RULES_EN = (
+    "\n- product_features: exhaustively list EVERY product feature, capability, or "
+    "requirement discussed, each described in maximum detail. If none were discussed, use an empty array.\n"
+    "- project_work: exhaustively list EVERY project task, workstream, or deliverable "
+    "discussed, each described in maximum detail (scope, approach, blockers, owners). "
+    "If none were discussed, use an empty array."
+)
+
+_EXHAUSTIVE_RULES_EN = (
+    "\n\nEXHAUSTIVE MODE — be as thorough as humanly possible (this is a maximal-detail record):\n"
+    "- Do NOT summarise tersely anywhere. Capture EVERYTHING of substance from the transcript.\n"
+    "- product_features AND project_work: for EACH item provide a long, step-by-step list of "
+    "sub_points (the concrete steps, requirements, tasks and decisions), not just a couple.\n"
+    "- open_questions: exhaustively enumerate EVERY unresolved point, ambiguity, risk, or "
+    "question raised or implied — each as a full sentence WITH its context and why it is open. "
+    "Aim for many entries, not a short list.\n"
+    "- key_decisions and action_items: include every single one, with full context.\n"
+    "- It is better to be exhaustive and long than concise."
+)
+
+
+def _build_prompt_en(tier: dict, duration_mins: int, extras: bool = False,
+                     exhaustive: bool = False) -> str:
+    extra_fields = _EXTENSIVE_FIELDS_EN if extras else ""
+    extra_rules = (_EXTENSIVE_RULES_EN if extras else "") + (_EXHAUSTIVE_RULES_EN if exhaustive else "")
     return f"""You are a senior executive assistant writing professional meeting minutes.
 
 This meeting is ~{duration_mins} minutes long. Produce a JSON object matching this EXACT structure:
@@ -170,12 +231,12 @@ This meeting is ~{duration_mins} minutes long. Produce a JSON object matching th
   "timeline": ["00:00-03:12: Opening with introductions and agenda review"],
   "participants": ["SPEAKER_00 (Name - Affiliation, role in meeting)"],
   "next_steps": ["Concrete action with owner and timeframe"],
-  "open_questions": ["Unresolved item deferred for later"]
+  "open_questions": ["Unresolved item deferred for later"]{extra_fields}
 }}
 
 Aim for {tier['topics']} topics and {tier['timeline']} timeline entries.
 
-QUALITY RULES:
+QUALITY RULES:{extra_rules}
 - Write substantive prose, not telegrams. Each topic summary should be a proper briefing paragraph.
 - Reference specific names, systems, and domain terms (in quotes) from the transcript.
 - Explain the "why" behind discussions, not just the "what".
@@ -253,7 +314,38 @@ TRANSKRIPT:
 {{transcript}}"""
 
 
-def _build_prompt_de(tier: dict, duration_mins: int) -> str:
+_EXTENSIVE_FIELDS_DE = """,
+  "product_features": [
+    {"name": "Name des Features oder der Funktion", "summary": "So detailliert wie das Transkript hergibt: was das Feature macht, welches Problem es loest, genannte Anforderungen und Akzeptanzkriterien, Abhaengigkeiten, Sonderfaelle und offene Design-Fragen.", "sub_points": [{"text": "Konkrete Anforderung, Verhalten oder Teil-Feature", "detail": "1-3 Saetze mit Details."}], "status": "geplant | in_arbeit | fertig"}
+  ],
+  "project_work": [
+    {"name": "Arbeitspaket, Aufgabe oder Liefergegenstand", "summary": "So detailliert wie das Transkript hergibt: Umfang, zu erledigende Arbeit, Vorgehen, Blocker, Risiken, Schaetzungen und Abhaengigkeiten von anderen Arbeiten oder Personen.", "sub_points": [{"text": "Konkrete Aufgabe oder Schritt", "detail": "1-3 Saetze: wer, was, Status."}], "status": "offen | in_arbeit | blockiert | fertig", "remaining": ["Konkreter offener Punkt"]}
+  ]"""
+
+_EXTENSIVE_RULES_DE = (
+    "\n- product_features: Liste LUECKENLOS JEDES besprochene Produkt-Feature, jede Funktion "
+    "oder Anforderung auf, jeweils maximal detailliert. Falls keine besprochen wurden, leeres Array.\n"
+    "- project_work: Liste LUECKENLOS JEDE besprochene Projektaufgabe, jeden Arbeitsstrang oder "
+    "Liefergegenstand auf, jeweils maximal detailliert (Umfang, Vorgehen, Blocker, Verantwortliche). "
+    "Falls keine besprochen wurden, leeres Array."
+)
+
+_EXHAUSTIVE_RULES_DE = (
+    "\n\nEXHAUSTIVE-MODUS — so gruendlich wie nur moeglich (maximal detailliertes Protokoll):\n"
+    "- NIRGENDS knapp zusammenfassen. Erfasse ALLES Inhaltliche aus dem Transkript.\n"
+    "- product_features UND project_work: fuer JEDEN Eintrag eine lange, schrittweise Liste von "
+    "sub_points (die konkreten Schritte, Anforderungen, Aufgaben und Entscheidungen), nicht nur ein paar.\n"
+    "- open_questions: zaehle LUECKENLOS JEDEN offenen Punkt, jede Unklarheit, jedes Risiko und jede "
+    "Frage auf — jeweils als vollstaendiger Satz MIT Kontext und warum es offen ist. Ziel: viele Eintraege.\n"
+    "- key_decisions und action_items: jede einzelne mit vollem Kontext.\n"
+    "- Lieber ausfuehrlich und lang als knapp."
+)
+
+
+def _build_prompt_de(tier: dict, duration_mins: int, extras: bool = False,
+                     exhaustive: bool = False) -> str:
+    extra_fields = _EXTENSIVE_FIELDS_DE if extras else ""
+    extra_rules = (_EXTENSIVE_RULES_DE if extras else "") + (_EXHAUSTIVE_RULES_DE if exhaustive else "")
     return f"""Du bist ein Senior Executive Assistant und schreibst professionelle Meeting-Protokolle.
 
 Dieses Meeting dauert ca. {duration_mins} Minuten. Erstelle ein JSON-Objekt mit genau dieser Struktur:
@@ -280,12 +372,12 @@ Dieses Meeting dauert ca. {duration_mins} Minuten. Erstelle ein JSON-Objekt mit 
   "timeline": ["00:00-03:12: Eroeffnung mit Vorstellungen und Agenda-Review"],
   "participants": ["SPEAKER_00 (Name - Zugehoerigkeit, Rolle im Meeting)"],
   "next_steps": ["Konkreter naechster Schritt mit Verantwortlichem und Zeitrahmen"],
-  "open_questions": ["Ungeklaerter Punkt, verschoben auf spaeter"]
+  "open_questions": ["Ungeklaerter Punkt, verschoben auf spaeter"]{extra_fields}
 }}
 
 Ziel: {tier['topics']} Themen und {tier['timeline']} Timeline-Eintraege.
 
-QUALITAETSREGELN:
+QUALITAETSREGELN:{extra_rules}
 - Substantielle Prosa, keine Telegramme. Jede Themenzusammenfassung ist ein Briefing-Absatz.
 - Spezifische Namen, Systeme und Fachbegriffe (in Anfuehrungszeichen) aus dem Transkript referenzieren.
 - Das "Warum" hinter Diskussionen erklaeren, nicht nur das "Was".
@@ -399,17 +491,23 @@ def _get_model_profile(model: str, base_url: str) -> dict:
 
 
 def _max_tokens_for_model(model: str, base_url: str, detail_level: str = "standard") -> int:
-    """Return a safe max_tokens limit. Doubled for detail_level='detailed',
-    but clamped so input still has reasonable room in the context window."""
+    """Return a safe max_tokens limit. Scaled by detail level
+    (detailed ≈2x, extensive ≈4x, exhaustive ≈10x the base output), but clamped
+    so the input (transcript) still has reasonable room in the context window."""
     profile = _get_model_profile(model, base_url)
     base = profile["max_output_tokens"]
-    if detail_level != "detailed":
+    factor = {"detailed": 2, "extensive": 4, "exhaustive": 10}.get(detail_level)
+    if not factor:
         return base
-    # Try to double, but leave at least ~25% of the context window for transcript+prompt.
     ctx = profile["context_window"]
     safety = profile.get("safety_margin_tokens", 100)
-    desired = base * 2
-    max_allowed = int(ctx * 0.75) - safety
+    desired = base * factor
+    # Cap the output so the transcript still fits. For "exhaustive" the output
+    # ceiling alone could otherwise consume ~75% of the context and truncate the
+    # transcript so hard that quality drops — so reserve more room for input
+    # (≈45%) while still allowing a very large summary.
+    ceiling_frac = 0.55 if detail_level == "exhaustive" else 0.75
+    max_allowed = int(ctx * ceiling_frac) - safety
     return min(desired, max_allowed)
 
 
@@ -719,7 +817,7 @@ async def summarize(
     dominant_lang = _detect_dominant_language(transcript)
     summary_lang = dominant_lang if language == "auto" else language
 
-    if detail_level not in ("standard", "detailed"):
+    if detail_level not in ("standard", "detailed", "extensive", "exhaustive"):
         detail_level = "standard"
 
     # Pick prompt depth based on audio duration
@@ -737,11 +835,17 @@ async def summarize(
     effective_base_url = openai_base_url or ""
     profile = _get_model_profile(effective_model, effective_base_url)
     use_compact = profile["context_window"] <= 8192
+    # The dedicated product-feature / project-work breakdown is added in the
+    # "extensive" and "exhaustive" levels; "exhaustive" also turns on the
+    # maximal-thoroughness rules (step-by-step sub-points + exhaustive
+    # questions). Only on the full prompt (small-context models use compact).
+    extras = detail_level in ("extensive", "exhaustive") and not use_compact
+    exhaustive = detail_level == "exhaustive" and not use_compact
 
     if summary_lang == "de":
-        prompt_template = _build_prompt_de_compact(tier, duration_mins) if use_compact else _build_prompt_de(tier, duration_mins)
+        prompt_template = _build_prompt_de_compact(tier, duration_mins) if use_compact else _build_prompt_de(tier, duration_mins, extras, exhaustive)
     else:
-        prompt_template = _build_prompt_en_compact(tier, duration_mins) if use_compact else _build_prompt_en(tier, duration_mins)
+        prompt_template = _build_prompt_en_compact(tier, duration_mins) if use_compact else _build_prompt_en(tier, duration_mins, extras, exhaustive)
 
     if use_compact:
         logger.info("Using compact prompt for small-context model (%d tokens)", profile["context_window"])
@@ -897,6 +1001,49 @@ async def summarize(
             return []
         return [str(v) for v in val]
 
+    # product_features / project_work share the topic shape (name, summary,
+    # sub_points, status, remaining) — parse them the same way as key_topics.
+    def _parse_topic_details(raw) -> list[TopicDetail]:
+        out: list[TopicDetail] = []
+        for t in raw or []:
+            if isinstance(t, (str, int, float)):
+                name = str(t).strip()
+                if name and not name.isdigit():
+                    out.append(TopicDetail(name=name, summary=""))
+                continue
+            if not isinstance(t, dict):
+                continue
+            sps = []
+            for sp in t.get("sub_points", []) or []:
+                if isinstance(sp, dict):
+                    if _is_garbage_subpoint(sp):
+                        continue
+                    sps.append(SubPoint(
+                        text=str(sp.get("text", "")),
+                        detail=str(sp["detail"]) if sp.get("detail") is not None else None,
+                    ))
+                else:
+                    txt = str(sp).strip()
+                    if txt and not txt.isdigit():
+                        sps.append(SubPoint(text=txt))
+            remaining_raw = t.get("remaining") or []
+            remaining = [str(r) for r in remaining_raw if str(r).strip() and not str(r).strip().isdigit()]
+            name = str(t.get("name", "")).strip()
+            summary = str(t.get("summary", "")).strip()
+            if not name and not summary:
+                continue
+            out.append(TopicDetail(
+                name=name or "(unnamed)",
+                summary=summary,
+                sub_points=sps or None,
+                status=str(t["status"]) if t.get("status") else None,
+                remaining=remaining or None,
+            ))
+        return out
+
+    product_features = _parse_topic_details(data.get("product_features")) or None
+    project_work = _parse_topic_details(data.get("project_work")) or None
+
     return SummaryResult(
         overall_summary=str(data.get("overall_summary", "")),
         key_topics=topics,
@@ -906,5 +1053,102 @@ async def summarize(
         timeline=_str_list(data.get("timeline")) or None,
         next_steps=_str_list(data.get("next_steps")) or None,
         open_questions=_str_list(data.get("open_questions")) or None,
+        product_features=product_features,
+        project_work=project_work,
         language=summary_lang,
     )
+
+
+# ── Selection summarizer: summarize a chosen transcript excerpt ──────────
+# Produces TWO variants of the same excerpt: one that keeps the concrete
+# examples given, and one with all examples stripped (core points only).
+
+_SELECTION_MAX_CHARS = 16000
+
+
+_SELECTION_STRUCTURE = (
+    "Structure each summary as a compact analyst brief in Markdown, using ONLY the "
+    "sections that actually apply to this excerpt (omit empty ones):\n"
+    "**Problem / Context** — what problem or situation is being discussed and why it matters.\n"
+    "**Key points / Requirements** — bullet list; each bullet a complete, substantive statement "
+    "(derived requirements, agreed behaviours, constraints).\n"
+    "**Decisions** — what was explicitly decided, with conditions.\n"
+    "**Open questions** — unresolved points, each with WHY it is open.\n"
+    "**Implications** — what follows from this for the product/project (only if the excerpt supports it).\n"
+    "Use '**Section**' bold headers and '- ' bullets. No deeper nesting."
+)
+
+
+def _build_selection_prompt(excerpt: str) -> str:
+    return (
+        "You are a senior analyst writing a structured brief from an excerpt of a "
+        "meeting transcript. Analyze ONLY this excerpt — do not invent anything not "
+        "present or clearly implied in it.\n\n"
+        "Return a JSON object with EXACTLY these keys, written in the SAME language "
+        "as the excerpt:\n"
+        "{\n"
+        '  "topic": "a short title (3-8 words) naming what this excerpt is about",\n'
+        '  "with_examples": "Structured brief that PRESERVES the concrete examples, '
+        'cases, tools, numbers and specifics mentioned (markdown string).",\n'
+        '  "without_examples": "Structured brief of the SAME excerpt with every '
+        'specific example, anecdote, illustrative case and concrete number REMOVED — '
+        'only the core principles, requirements, decisions and questions (markdown string)."\n'
+        "}\n\n"
+        + _SELECTION_STRUCTURE + "\n\n"
+        "QUALITY RULES for both briefs:\n"
+        "- Do not just restate sentences — SYNTHESIZE: turn statements into derived "
+        "requirements ('The orchestrator must...'), name trade-offs, and separate what "
+        "was decided from what remains open.\n"
+        "- Do NOT mention speaker labels (SPEAKER_00, SPEAKER_01, ...) and do NOT "
+        "attribute statements to individual speakers. Write impersonal, topic-focused "
+        'prose: "The discussion covers...", "It was decided...".\n'
+        "- Real person names may be kept only when the content is ABOUT that person "
+        "(e.g. an owner of an action item), not as the subject of who said what.\n"
+        "- Inside the JSON string values use \\n for line breaks.\n\n"
+        "ONLY valid JSON. No code fences, no text outside the JSON.\n\n"
+        "EXCERPT:\n" + excerpt
+    )
+
+
+async def summarize_selection(
+    text: str,
+    *,
+    backend: str = "openai",
+    openai_base_url: str = "",
+    openai_api_key: str = "",
+    openai_model: str = "",
+    ollama_base_url: str = "",
+    ollama_model: str = "",
+    temperature: float | None = None,
+) -> dict:
+    """Summarize a selected transcript excerpt into two variants.
+
+    Returns {"topic": str, "with_examples": str, "without_examples": str}.
+    """
+    excerpt = (text or "").strip()[:_SELECTION_MAX_CHARS]
+    prompt = _build_selection_prompt(excerpt)
+
+    if backend == "openai":
+        raw = await _call_openai_compatible(
+            prompt, openai_base_url, openai_api_key, openai_model,
+            temperature=temperature,
+        )
+    else:
+        raw = await _call_ollama(prompt, ollama_base_url, ollama_model)
+
+    if "<think>" in raw:
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("Selection summary: invalid JSON (first 300): %s", raw[:300])
+        # Fall back: put the raw text into with_examples so the user still gets something
+        data = {"topic": "Selection", "with_examples": raw.strip()[:2000], "without_examples": ""}
+
+    data = _clean_json_strings(data)
+    return {
+        "topic": str(data.get("topic", "Selection")).strip() or "Selection",
+        "with_examples": str(data.get("with_examples", "")).strip(),
+        "without_examples": str(data.get("without_examples", "")).strip(),
+    }

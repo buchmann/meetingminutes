@@ -68,6 +68,10 @@ class SummaryResult(BaseModel):
     timeline: list[str] | None = None
     next_steps: list[str] | None = None
     open_questions: list[str] | None = None
+    # Populated only for the "extensive" (4x) detail level: dedicated, maximally
+    # detailed breakdowns of product features and project work discussed.
+    product_features: list[TopicDetail] | None = None
+    project_work: list[TopicDetail] | None = None
     language: str
 
 

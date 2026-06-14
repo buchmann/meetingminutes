@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     gpu_manager_url: str = ""  # e.g. "http://192.168.178.190:9090"
     # vLLM profile for GPU manager: "large" (120B), "small" (granite 8B), or "auto" (detect from model/port)
     vllm_profile: str = "auto"
+    # GPU-manager endpoint for the ACTIVE model — set at runtime by apply_llm().
+    vllm_gpu_endpoint: str = "vllm-small"
+    # Active LLM key (one of LLM_MODELS). Persisted in DB; applied at startup.
+    active_llm: str = "gptoss"
 
     # OpenTelemetry tracing
     otel_enabled: bool = False
@@ -120,3 +124,38 @@ class Settings(BaseSettings):
     def ensure_dirs(self):
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+
+# ── Switchable LLMs (DGX Spark) ────────────────────────────────────────
+# The active model is chosen in Settings, persisted in DB, and applied to the
+# Settings object at startup / on switch via apply_llm(). All LLM features read
+# settings.openai_base_url / openai_model, so switching here switches everything.
+# Only ONE can be GPU-resident at a time (128GB unified memory) — switching
+# triggers a GPU-manager swap (gpu_endpoint) and a ~3-5 min model reload.
+LLM_MODELS: dict[str, dict] = {
+    "gptoss": {
+        "label": "GPT-OSS 120B",
+        "detail": "CUTLASS MXFP4 · ~60 tok/s · strongest analysis & German",
+        "base_url": "http://192.168.178.190:8000/v1",
+        "model": "gpt-oss-120b",
+        "gpu_endpoint": "vllm/large",
+    },
+    "granite": {
+        "label": "Granite 4.0-H-Small",
+        "detail": "32K context · ~10 tok/s · lighter / lower power",
+        "base_url": "http://192.168.178.190:8001/v1",
+        "model": "ibm/granite-3-3-8b-instruct",
+        "gpu_endpoint": "vllm-small",
+    },
+}
+DEFAULT_LLM = "gptoss"
+
+
+def apply_llm(settings: "Settings", key: str) -> dict:
+    """Point the Settings object at the chosen model. Returns the model dict."""
+    model = LLM_MODELS.get(key) or LLM_MODELS[DEFAULT_LLM]
+    settings.active_llm = key if key in LLM_MODELS else DEFAULT_LLM
+    settings.openai_base_url = model["base_url"]
+    settings.openai_model = model["model"]
+    settings.vllm_gpu_endpoint = model["gpu_endpoint"]
+    return model

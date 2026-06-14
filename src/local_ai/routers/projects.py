@@ -42,6 +42,7 @@ DOC_TYPE_LABELS = {
     "summary": "Summary",
     "product_spec": "Product Spec",
     "project_spec": "Project Spec",
+    "minutes": "Meeting Minutes",
     "note": "Note",
     "upload": "Upload",
     "document": "Document",
@@ -59,24 +60,51 @@ async def _owned_project(db, project_id: str, user: dict) -> dict:
 
 
 @router.get("/projects")
-async def projects_page(request: Request, user: dict = Depends(require_user)):
+async def projects_page(request: Request, user: dict = Depends(require_user), q: str = ""):
     db = request.app.state.db
-    projects = await db.list_projects(user["id"])
+    q = (q or "").strip()
+    if q:
+        projects = await db.search_projects(user["id"], q)
+    else:
+        projects = await db.list_projects(user["id"])
     return request.app.state.templates.TemplateResponse(
         request, "projects.html",
-        {"user": user, "projects": projects},
+        {"user": user, "projects": projects, "q": q},
     )
 
 
 @router.get("/projects/{project_id}")
-async def project_detail_page(project_id: str, request: Request, user: dict = Depends(require_user)):
+async def project_detail_page(project_id: str, request: Request, q: str = "",
+                              user: dict = Depends(require_user)):
     db = request.app.state.db
     project = await _owned_project(db, project_id, user)
-    docs = await db.list_project_docs(project_id, user["id"])
+    # Chronological history: oldest first.
+    docs = await db.list_project_docs(project_id, user["id"], order="asc")
     return request.app.state.templates.TemplateResponse(
         request, "project_detail.html",
-        {"user": user, "project": project, "docs": docs, "doc_type_labels": DOC_TYPE_LABELS},
+        {"user": user, "project": project, "docs": docs,
+         "doc_type_labels": DOC_TYPE_LABELS, "q": (q or "").strip()},
     )
+
+
+@router.get("/api/projects/{project_id}/search")
+async def api_search_project(project_id: str, request: Request, q: str = "",
+                             user: dict = Depends(require_user)):
+    """Search within one project's documents (title + content). Returns JSON."""
+    db = request.app.state.db
+    await _owned_project(db, project_id, user)
+    results = await db.search_project_docs(project_id, user["id"], q)
+    return {
+        "query": (q or "").strip(),
+        "count": len(results),
+        "results": [
+            {
+                "id": r["id"], "title": r["title"], "doc_type": r["doc_type"],
+                "source": r["source"], "created_at": r["created_at"], "snippet": r["snippet"],
+            }
+            for r in results
+        ],
+    }
 
 
 # ── Project CRUD ──────────────────────────────────────────────────────

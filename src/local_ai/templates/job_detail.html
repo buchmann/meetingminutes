@@ -138,6 +138,8 @@
             <select id="resummarize-detail">
                 <option value="standard" {% if (job.summary_detail or 'standard') == 'standard' %}selected{% endif %}>Standard</option>
                 <option value="detailed" {% if job.summary_detail == 'detailed' %}selected{% endif %}>Detailed (≈2× content)</option>
+                <option value="extensive" {% if job.summary_detail == 'extensive' %}selected{% endif %}>Extensive (≈4× + product &amp; project)</option>
+                <option value="exhaustive" {% if job.summary_detail == 'exhaustive' %}selected{% endif %}>Exhaustive (≈10× + steps &amp; questions)</option>
             </select>
         </label>
         <button id="resummarize-btn" class="outline" onclick="resummarize()">
@@ -192,8 +194,32 @@
             Summary
             {% if job.summary_detail == 'detailed' %}
             <span class="tag" style="font-size:0.7em;vertical-align:middle">Detailed</span>
+            {% elif job.summary_detail == 'extensive' %}
+            <span class="tag" style="font-size:0.7em;vertical-align:middle">Extensive 4×</span>
+            {% elif job.summary_detail == 'exhaustive' %}
+            <span class="tag" style="font-size:0.7em;vertical-align:middle">Exhaustive 10×</span>
             {% endif %}
         </h3>
+        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        {% if projects %}
+        <details style="margin:0">
+            <summary class="outline secondary" role="button" style="padding:0.3rem 0.8rem;font-size:0.85rem;margin:0">
+                + Add to project
+            </summary>
+            <div style="position:absolute;right:1rem;margin-top:0.5rem;background:var(--card-background-color,#fff);border:1px solid var(--muted-border-color,#ccc);padding:1rem;border-radius:0.4rem;z-index:10;min-width:280px">
+                <label style="display:block;margin-bottom:0.5rem">
+                    Save these minutes to
+                    <select id="proj-select">
+                        {% for p in projects %}
+                        <option value="{{ p.id }}">{{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button id="proj-btn" onclick="addToProject()" style="width:100%;margin:0">Add to project</button>
+                <small id="proj-msg" style="display:none;margin-top:0.4rem"></small>
+            </div>
+        </details>
+        {% endif %}
         <details style="margin:0">
             <summary class="outline secondary" role="button" style="padding:0.3rem 0.8rem;font-size:0.85rem;margin:0">
                 Regenerate Summary
@@ -204,12 +230,41 @@
                     <select id="regen-detail">
                         <option value="standard" {% if (job.summary_detail or 'standard') == 'standard' %}selected{% endif %}>Standard</option>
                         <option value="detailed" {% if job.summary_detail == 'detailed' %}selected{% endif %}>Detailed (≈2× content)</option>
+                        <option value="extensive" {% if job.summary_detail == 'extensive' %}selected{% endif %}>Extensive (≈4× + product &amp; project)</option>
+                        <option value="exhaustive" {% if job.summary_detail == 'exhaustive' %}selected{% endif %}>Exhaustive (≈10× + steps &amp; questions)</option>
                     </select>
                 </label>
                 <button id="regen-btn" onclick="regenerateSummary()" style="width:100%;margin:0">Regenerate</button>
             </div>
         </details>
+        </div>
     </header>
+    <script>
+        async function addToProject() {
+            const btn = document.getElementById('proj-btn');
+            const sel = document.getElementById('proj-select');
+            const msg = document.getElementById('proj-msg');
+            const projectId = sel.value;
+            const projectName = sel.options[sel.selectedIndex].text;
+            btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+            msg.style.display = 'none';
+            try {
+                const fd = new FormData();
+                fd.set('project_id', projectId);
+                const r = await fetch('/api/jobs/{{ job.id }}/to-project', { method: 'POST', body: fd });
+                const data = await r.json();
+                if (!r.ok || !data.ok) throw new Error(data.detail || 'Failed');
+                msg.textContent = '✓ Saved to “' + projectName + '”';
+                msg.className = ''; msg.style.color = 'var(--pico-ins-color, #2d6a4f)';
+            } catch (err) {
+                msg.textContent = '✕ ' + err.message;
+                msg.style.color = '#c0392b';
+            } finally {
+                msg.style.display = 'block';
+                btn.disabled = false; btn.removeAttribute('aria-busy');
+            }
+        }
+    </script>
     <script>
         function regenerateSummary() {
             const btn = document.getElementById('regen-btn');
@@ -328,6 +383,56 @@
     </ul>
     {% endif %}
 
+    {% if summary.product_features %}
+    <h4>Product Features</h4>
+    {% for feat in summary.product_features %}
+    <details open>
+        <summary>
+            <strong>{{ feat.name if feat is mapping else feat }}</strong>
+            {% if feat is mapping and feat.status %}
+            <span class="status-pill status-{{ feat.status }}">{{ feat.status }}</span>
+            {% endif %}
+        </summary>
+        {% if feat is mapping and feat.summary %}<p>{{ feat.summary }}</p>{% endif %}
+        {% if feat is mapping and feat.sub_points %}
+        <ul class="sub-points">
+            {% for sp in feat.sub_points %}
+            <li><strong>{{ sp.text }}</strong>{% if sp.detail %}<br><span class="sub-detail">{{ sp.detail }}</span>{% endif %}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </details>
+    {% endfor %}
+    {% endif %}
+
+    {% if summary.project_work %}
+    <h4>Project Work</h4>
+    {% for pw in summary.project_work %}
+    <details open>
+        <summary>
+            <strong>{{ pw.name if pw is mapping else pw }}</strong>
+            {% if pw is mapping and pw.status %}
+            <span class="status-pill status-{{ pw.status }}">{{ pw.status }}</span>
+            {% endif %}
+        </summary>
+        {% if pw is mapping and pw.summary %}<p>{{ pw.summary }}</p>{% endif %}
+        {% if pw is mapping and pw.sub_points %}
+        <ul class="sub-points">
+            {% for sp in pw.sub_points %}
+            <li><strong>{{ sp.text }}</strong>{% if sp.detail %}<br><span class="sub-detail">{{ sp.detail }}</span>{% endif %}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        {% if pw is mapping and pw.remaining %}
+        <div class="remaining-items">
+            <small><strong>Remaining:</strong></small>
+            <ul>{% for r in pw.remaining %}<li><small>{{ r }}</small></li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+    </details>
+    {% endfor %}
+    {% endif %}
+
     {% if summary.next_steps %}
     <h4>Next Steps</h4>
     <ul class="next-steps">
@@ -360,7 +465,12 @@
         </div>
     </header>
     {% if transcript and transcript.segments %}
-    <div class="transcript-view">
+    <div class="sel-toolbar" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--pico-card-sectioning-background-color,rgba(128,128,128,0.06));border-radius:0.4rem">
+        <small style="color:var(--muted-color,#888)">Select a passage in the transcript, then →</small>
+        <button type="button" id="sel-btn" class="outline" style="margin:0;padding:0.3rem 0.8rem;font-size:0.85rem" onclick="summarizeSelection()">Summarize selection</button>
+        <small id="sel-hint" style="color:var(--muted-color,#888)"></small>
+    </div>
+    <div class="transcript-view" id="transcript-view">
         {% for seg in transcript.segments %}
         <div class="transcript-segment">
             <span class="ts">[{{ "%02d"|format((seg.start // 3600)|int) }}:{{ "%02d"|format(((seg.start % 3600) // 60)|int) }}:{{ "%02d"|format((seg.start % 60)|int) }}]</span>
@@ -371,6 +481,122 @@
         </div>
         {% endfor %}
     </div>
+
+    <div id="sel-result" style="display:none;margin-top:1rem">
+        <header style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+            <strong>Topic: <span id="sel-topic"></span></strong>
+            {% if projects %}
+            <label style="margin:0;display:flex;align-items:center;gap:0.4rem">
+                <small style="white-space:nowrap">Save to</small>
+                <select id="sel-project" style="margin:0;width:auto">
+                    {% for p in projects %}
+                    <option value="{{ p.id }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            {% endif %}
+        </header>
+        <div class="grid">
+            <article style="margin:0.5rem 0">
+                <header style="display:flex;justify-content:space-between;align-items:center">
+                    <strong>With examples</strong>
+                    {% if projects %}<button type="button" class="outline secondary" style="margin:0;padding:0.2rem 0.6rem;font-size:0.75rem" onclick="saveSelection('with')">Save to project</button>{% endif %}
+                </header>
+                <div id="sel-with" style="font-size:0.92rem"></div>
+            </article>
+            <article style="margin:0.5rem 0">
+                <header style="display:flex;justify-content:space-between;align-items:center">
+                    <strong>Without examples</strong>
+                    {% if projects %}<button type="button" class="outline secondary" style="margin:0;padding:0.2rem 0.6rem;font-size:0.75rem" onclick="saveSelection('without')">Save to project</button>{% endif %}
+                </header>
+                <div id="sel-without" style="font-size:0.92rem"></div>
+            </article>
+        </div>
+        <small id="sel-save-msg" style="display:none"></small>
+    </div>
+
+    <script>
+        let SEL = null;
+        function mdLite(src) {
+            // Minimal, safe markdown: escape HTML, then **bold**, "- " bullets, paragraphs.
+            const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const lines = esc(src || '').split('\n');
+            let html = '', inList = false;
+            const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                                 .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+            for (const ln of lines) {
+                const t = ln.trim();
+                if (t.startsWith('- ')) {
+                    if (!inList) { html += '<ul style="margin:0.2rem 0 0.5rem 1.1rem">'; inList = true; }
+                    html += '<li>' + bold(t.slice(2)) + '</li>';
+                } else {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    if (t) html += '<p style="margin:0.35rem 0">' + bold(t) + '</p>';
+                }
+            }
+            if (inList) html += '</ul>';
+            return html;
+        }
+        function _selectedTranscriptText() {
+            const sel = window.getSelection();
+            if (!sel || sel.isCollapsed || !sel.rangeCount) return "";
+            const view = document.getElementById('transcript-view');
+            const r = sel.getRangeAt(0);
+            // Only accept selections that lie within the transcript view
+            if (!view.contains(r.commonAncestorContainer)) return "";
+            return sel.toString().trim();
+        }
+        async function summarizeSelection() {
+            const text = _selectedTranscriptText();
+            const hint = document.getElementById('sel-hint');
+            const btn = document.getElementById('sel-btn');
+            if (text.length < 20) {
+                hint.textContent = 'Select a passage in the transcript first (a sentence or more).';
+                return;
+            }
+            hint.textContent = '';
+            btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = 'Summarizing…';
+            try {
+                const fd = new FormData(); fd.set('text', text);
+                const r = await fetch('/api/jobs/{{ job.id }}/summarize-selection', { method: 'POST', body: fd });
+                const data = await r.json();
+                if (!r.ok || !data.ok) throw new Error(data.detail || 'Failed');
+                SEL = data;
+                document.getElementById('sel-topic').textContent = data.topic || 'Selection';
+                document.getElementById('sel-with').innerHTML = mdLite(data.with_examples) || '(none)';
+                document.getElementById('sel-without').innerHTML = mdLite(data.without_examples) || '(none)';
+                document.getElementById('sel-save-msg').style.display = 'none';
+                document.getElementById('sel-result').style.display = 'block';
+                document.getElementById('sel-result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (err) {
+                hint.textContent = '✕ ' + err.message;
+            } finally {
+                btn.disabled = false; btn.removeAttribute('aria-busy'); btn.textContent = 'Summarize selection';
+            }
+        }
+        async function saveSelection(which) {
+            if (!SEL) return;
+            const projSel = document.getElementById('sel-project');
+            const msg = document.getElementById('sel-save-msg');
+            const projectId = projSel.value;
+            const projectName = projSel.options[projSel.selectedIndex].text;
+            const body = which === 'with' ? SEL.with_examples : SEL.without_examples;
+            const title = (SEL.topic || 'Selection') + (which === 'with' ? ' (with examples)' : ' (core, no examples)');
+            try {
+                const fd = new FormData();
+                fd.set('title', title);
+                fd.set('content', '# ' + title + '\n\n' + body);
+                const r = await fetch('/api/projects/' + projectId + '/docs', { method: 'POST', body: fd });
+                if (!r.ok) throw new Error('Save failed');
+                msg.textContent = '✓ Saved “' + title + '” to “' + projectName + '”';
+                msg.style.color = 'var(--pico-ins-color, #2d6a4f)';
+            } catch (err) {
+                msg.textContent = '✕ ' + err.message;
+                msg.style.color = '#c0392b';
+            }
+            msg.style.display = 'block';
+        }
+    </script>
     {% else %}
     <p>No transcript segments available.</p>
     {% endif %}

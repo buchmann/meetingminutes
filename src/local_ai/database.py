@@ -154,6 +154,12 @@ CREATE TABLE IF NOT EXISTS project_docs (
 );
 CREATE INDEX IF NOT EXISTS idx_project_docs_project ON project_docs(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_docs_user ON project_docs(user_id);
+
+-- Global app config (key/value), e.g. the active LLM choice -------------
+CREATE TABLE IF NOT EXISTS app_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -657,15 +663,80 @@ class Database:
         row = await cur.fetchone()
         return dict(row) if row else None
 
-    async def list_project_docs(self, project_id: str, user_id: str) -> list[dict]:
-        """Document metadata (no body) for a project's detail view."""
+    async def list_project_docs(self, project_id: str, user_id: str, *, order: str = "desc") -> list[dict]:
+        """Document metadata (no body) for a project's detail view.
+
+        order='asc' → oldest first (chronological history); 'desc' → newest first.
+        """
+        direction = "ASC" if order == "asc" else "DESC"
         cur = await self._db.execute(
-            """SELECT id, project_id, user_id, title, doc_type, source, fmt,
+            f"""SELECT id, project_id, user_id, title, doc_type, source, fmt,
                       LENGTH(content) AS char_count, created_at
-               FROM project_docs WHERE project_id = ? AND user_id = ? ORDER BY created_at DESC""",
+               FROM project_docs WHERE project_id = ? AND user_id = ? ORDER BY created_at {direction}""",
             (project_id, user_id),
         )
         return [dict(r) for r in await cur.fetchall()]
+
+    @staticmethod
+    def _snippet(content: str, query: str, width: int = 140) -> str:
+        """Extract a ~width-char snippet of *content* around the first match of *query*."""
+        if not content:
+            return ""
+        lc = content.lower()
+        idx = lc.find(query.lower())
+        if idx < 0:
+            return content[:width].strip()
+        start = max(0, idx - width // 3)
+        end = min(len(content), idx + len(query) + (2 * width) // 3)
+        snip = content[start:end].strip().replace("\n", " ")
+        return ("…" if start > 0 else "") + snip + ("…" if end < len(content) else "")
+
+    async def search_project_docs(self, project_id: str, user_id: str, query: str,
+                                  limit: int = 30) -> list[dict]:
+        """Full-text-ish search within one project's docs (title + content LIKE)."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        like = f"%{q}%"
+        cur = await self._db.execute(
+            """SELECT id, title, doc_type, source, fmt, created_at, content
+               FROM project_docs
+               WHERE project_id = ? AND user_id = ? AND (title LIKE ? OR content LIKE ?)
+               ORDER BY created_at DESC LIMIT ?""",
+            (project_id, user_id, like, like, limit),
+        )
+        out = []
+        for r in await cur.fetchall():
+            d = dict(r)
+            d["snippet"] = self._snippet(d.pop("content", ""), q)
+            out.append(d)
+        return out
+
+    async def search_projects(self, user_id: str, query: str) -> list[dict]:
+        """Search across all of a user's projects: match project name/description
+        OR any of its docs (title/content). Returns projects (with doc_count) plus
+        ``match_count`` = how many docs matched and ``name_match`` flag."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        like = f"%{q}%"
+        # Projects whose docs match, with per-project match counts
+        cur = await self._db.execute(
+            """SELECT project_id, COUNT(*) AS match_count
+               FROM project_docs
+               WHERE user_id = ? AND (title LIKE ? OR content LIKE ?)
+               GROUP BY project_id""",
+            (user_id, like, like),
+        )
+        doc_matches = {r["project_id"]: r["match_count"] for r in await cur.fetchall()}
+        results = []
+        for p in await self.list_projects(user_id):
+            name_match = q.lower() in (p["name"] or "").lower() or q.lower() in (p["description"] or "").lower()
+            mc = doc_matches.get(p["id"], 0)
+            if name_match or mc:
+                p = {**p, "match_count": mc, "name_match": name_match}
+                results.append(p)
+        return results
 
     async def delete_project_doc(self, doc_id: str, user_id: str) -> bool:
         cur = await self._db.execute(
@@ -673,6 +744,21 @@ class Database:
         )
         await self._db.commit()
         return cur.rowcount > 0
+
+    # ── App config (key/value) ───────────────────────────────────────
+
+    async def get_app_config(self, key: str, default: str | None = None) -> str | None:
+        cur = await self._db.execute("SELECT value FROM app_config WHERE key = ?", (key,))
+        row = await cur.fetchone()
+        return row["value"] if row else default
+
+    async def set_app_config(self, key: str, value: str) -> None:
+        await self._db.execute(
+            "INSERT INTO app_config (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        await self._db.commit()
 
     # ── Sessions ─────────────────────────────────────────────────────
 

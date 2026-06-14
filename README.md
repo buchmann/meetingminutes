@@ -42,9 +42,9 @@ local-ai Pod (FastAPI, SQLite, SSE progress)
     |
     +---> DGX Spark GPU Server (192.168.178.190, GB10, 128GB unified)
     |       |--- WhisperX             (port 8003)  — transcription + diarization
-    |       |--- vLLM Granite 4.0-H-Small (port 8001) — LLM, 32k context (production)
+    |       |--- vLLM gpt-oss-120b     (port 8000)  — LLM, MXFP4/CUTLASS, 32k (DEFAULT)
     |       |--- vLLM bge-m3           (port 8002)  — embeddings for RAG
-    |       |--- vLLM gpt-oss-120b     (port 8000)  — alt LLM, MXFP4 (experimental, off)
+    |       |--- vLLM Granite 4.0-H-Small (port 8001) — alt LLM, 32k context (switchable)
     |       |--- GPU Manager / DCGM    (port 9090/9400) — GPU metrics
     |       |--- OTEL Collector        (port 4317)  — telemetry relay to Instana
     |
@@ -76,10 +76,10 @@ Audio Upload / Recording
    + Diarize            (transcription + diarization in one call)
     |
     v
-4. GPU Swap           — GPU Manager activates vLLM (Granite or 120B) [80%]
+4. GPU Swap           — GPU Manager activates vLLM (gpt-oss-120b or Granite) [80%]
     |
     v
-5. Summarize          — Granite 3.3 8B generates structured JSON  [80-98%]
+5. Summarize          — active LLM (gpt-oss-120b by default) generates JSON [80-98%]
     |
     v
 6. Store + Export     — results in SQLite, exports generated      [98-100%]
@@ -137,13 +137,13 @@ The GPU server needs these containers running:
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
 | WhisperX | `mekopa/whisperx-blackwell:otel` | 8003 | Transcription + diarization |
-| vLLM Granite 8B | `vllm/vllm-openai:latest` | 8001 | LLM summarization (default, 8k ctx) |
-| vLLM GPT-OSS 120B | `vllm/vllm-openai:latest` | 8000 | LLM summarization (large, 32k ctx) |
+| vLLM gpt-oss-120b | `vllm-node-mxfp4` (custom CUTLASS build) | 8000 | LLM, **default**, MXFP4, 32k ctx |
+| vLLM Granite 4.0-H-Small | `vllm/vllm-openai:latest` | 8001 | LLM, alternative, BF16, 32k ctx |
 | GPU Manager | `python:3.12-slim` | 9090 | GPU memory orchestration |
 | DCGM Exporter | `nvcr.io/nvidia/k8s/dcgm-exporter` | 9400 | GPU metrics |
 | OTEL Collector | `otel-collector-contrib` | 4317/4318 | Telemetry relay |
 
-> **Note:** Only one vLLM model runs at a time. Granite (61GB) can coexist with WhisperX; the 120B model (90GB) needs the full GPU. The GPU Manager handles switching automatically.
+> **Note:** Only one large LLM fits in the 128GB unified memory at a time — gpt-oss-120b (~83GB) and Granite (~92GB) cannot coexist; WhisperX (~5GB) + embeddings (~7GB) can run alongside one. The **active model is switchable in Settings (admin)**, default **gpt-oss-120b**; switching triggers a GPU-manager swap (~3–5 min reload). gpt-oss needs the custom `vllm-node-mxfp4` image — see [`ops/README.md`](ops/README.md).
 
 ## Configuration
 
@@ -154,8 +154,8 @@ All settings use the `LOCAL_AI_` prefix and can be set via environment variables
 | `TRANSCRIPTION_BACKEND` | `local` | `local` or `remote` (DGX Spark) |
 | `WHISPERX_URL` | `http://192.168.178.190:8003` | Remote WhisperX endpoint |
 | `SUMMARY_BACKEND` | `ollama` | `ollama` or `openai` (vLLM) |
-| `OPENAI_BASE_URL` | `http://192.168.178.190:8001/v1` | vLLM endpoint |
-| `OPENAI_MODEL` | `ibm/granite-3-3-8b-instruct` | LLM model (`ibm/granite-3-3-8b-instruct` or `openai/gpt-oss-120b`) |
+| `OPENAI_BASE_URL` | `http://192.168.178.190:8000/v1` | vLLM endpoint (bootstrap; overridden by the active-model choice persisted in DB) |
+| `OPENAI_MODEL` | `gpt-oss-120b` | bootstrap default LLM; switch in Settings (`gpt-oss-120b` ⇄ `ibm/granite-3-3-8b-instruct`) |
 | `GPU_MANAGER_URL` | (empty) | GPU Manager endpoint |
 | `OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `OTEL_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint |
@@ -228,7 +228,7 @@ optional shared area.
 | Frontend | HTMX, PicoCSS, Jinja2 templates |
 | Database | SQLite via aiosqlite |
 | Transcription | WhisperX (large-v3) on NVIDIA Blackwell GPU |
-| LLM | IBM Granite 3.3 8B (8k ctx) or GPT-OSS 120B (32k ctx) via vLLM |
+| LLM | gpt-oss-120b (default) or Granite 4.0-H-Small, both 32k ctx, via vLLM (switchable) |
 | Observability | OpenTelemetry, Instana, DCGM Exporter |
 | Deployment | Docker, Kubernetes, nginx ingress |
 | GPU Server | NVIDIA DGX Spark (128GB unified memory) |

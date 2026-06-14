@@ -1,12 +1,18 @@
 # Model Integration
 
-How local-ai works with WhisperX, Granite, the 120B model, and the GPU Manager on DGX Spark.
+How local-ai works with WhisperX, the LLMs (gpt-oss-120b / Granite), and the GPU Manager on DGX Spark.
+
+> **Active LLM:** the default is **gpt-oss-120b** (port 8000, custom CUTLASS MXFP4 build).
+> Granite 4.0-H-Small (port 8001) is the lighter alternative. The active model is
+> switchable in Settings (admin) and persisted in the app DB; switching triggers a
+> GPU-manager swap (~3–5 min reload). Some figures below predate this and describe
+> Granite — see [`../ops/README.md`](../ops/README.md) for the current run commands.
 
 ## Hardware
 
-**NVIDIA DGX Spark** — 128GB unified memory (CPU + GPU shared), Blackwell B200 architecture.
+**NVIDIA DGX Spark** — GB10 Grace Blackwell, 128GB unified memory (CPU + GPU shared), compute capability sm_121.
 
-Unified memory means WhisperX (~5GB) and vLLM Granite (~61GB) can coexist simultaneously, with ~40GB free. The GPU Manager monitors this and enables co-running when memory allows. The larger 120B model (~90GB) needs the full GPU and cannot coexist with other services.
+Unified memory means WhisperX (~5GB) + embeddings (~7GB) can coexist with ONE large LLM, but the two LLMs cannot coexist: gpt-oss-120b (~83GB) and Granite (~92GB) each need most of the memory. The GPU Manager swaps them (and whisperx) so they don't collide.
 
 ## Models
 

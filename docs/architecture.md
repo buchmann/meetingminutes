@@ -98,7 +98,7 @@ flowchart TB
         WX["WhisperX<br/>:8003"]
         GR["vLLM Granite 4.0-H-Small<br/>32K ctx · :8001"]
         EM["vLLM bge-m3 embeddings<br/>:8002"]
-        OSS["vLLM gpt-oss-120b<br/>:8000 · optional/off"]
+        OSS["vLLM gpt-oss-120b<br/>:8000 · DEFAULT"]
         GPU["GPU manager · DCGM<br/>:9090"]
     end
 
@@ -108,8 +108,8 @@ flowchart TB
     API --> DBV
     API -->|web search| SX
     API -->|transcribe + diarize| WX
-    API -->|summaries · chat · extract| GR
-    API -.->|when enabled| OSS
+    API -->|summaries · chat · extract| OSS
+    API -.->|when switched| GR
     API -->|embeddings| EM
     API -->|GPU metrics| GPU
     API -->|read mail · send reply| EXT
@@ -190,7 +190,10 @@ The LLM context window is like a desk — everything (instructions, transcript, 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Granite 4.0-H-Small — 32768 tokens (current production):**
+Both models run at 32768 tokens. **The active model is switchable in Settings
+(admin); the default is gpt-oss-120b.**
+
+**Granite 4.0-H-Small — 32768 tokens (alternative):**
 
 ```
 Prompt:      1000 │██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
@@ -205,9 +208,11 @@ extraction runs in a single LLM call instead of being chunked. The app's
 `summarizer._MODEL_PROFILES["granite"]` mirrors this (`context_window: 32768`,
 `max_output_tokens: 4096`).
 
-> gpt-oss-120b (`:8000`, MXFP4, also 32K) is an experimental alternative — see
-> [models.md](models.md). It needs a custom vLLM build for the GB10's MXFP4
-> kernels and is **off by default**; Granite is production.
+> **gpt-oss-120b** (`:8000`, MXFP4, 32K) is now the **default** model — stronger
+> analysis/synthesis and German prose, ~60 tok/s (≈6× Granite). It needs the
+> custom `vllm-node-mxfp4` CUTLASS build for the GB10's MXFP4 kernels (stock vLLM
+> produces garbage on sm_121) — see [`ops/README.md`](../ops/README.md). Granite
+> remains available as a lighter alternative; switch in Settings (admin).
 
 ### Why More Context Needs More GPU Memory
 
@@ -328,8 +333,8 @@ Generates structured meeting minutes from transcripts. This is the most complex 
 
 | Model | Context | Output Budget | Transcript Budget | Best For |
 |-------|---------|---------------|-------------------|----------|
-| Granite 8B (port 8001) | 8,192 | 2,048 | ~21k chars (~11 min) | Short/medium meetings, fast turnaround |
-| GPT-OSS 120B (port 8000) | 32,768 | 16,000 | ~61k chars (~34 min) | Long meetings, detailed summaries |
+| gpt-oss-120b (port 8000, **default**) | 32,768 | up to 16,000 | ~61k chars (~34 min) | strongest analysis & German, ~60 tok/s |
+| Granite 4.0-H-Small (port 8001) | 32,768 | 4,096 (×detail level) | ~61k chars (~34 min) | lighter / lower power, ~10 tok/s |
 
 ```python
 _MODEL_PROFILES = {

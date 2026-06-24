@@ -210,7 +210,7 @@ def _build_prompt_en(tier: dict, duration_mins: int, extras: bool = False,
 This meeting is ~{duration_mins} minutes long. Produce a JSON object matching this EXACT structure:
 
 {{
-  "overall_summary": "{tier['overall']} identifying participants and their affiliations, the central theme, key outcomes, and agreed direction. Reference specific project names and terms in quotes.",
+  "overall_summary": "{tier['overall']} identifying participants by the names actually used in the call (add a role or organisation ONLY if it was explicitly stated — never guess), the central theme, key outcomes, and agreed direction. Reference specific project names and terms in quotes.",
   "key_topics": [
     {{
       "name": "Descriptive Topic Title",
@@ -229,7 +229,7 @@ This meeting is ~{duration_mins} minutes long. Produce a JSON object matching th
   ],
   "key_decisions": ["Clear statement of what was decided with context and conditions."],
   "timeline": ["00:00-03:12: Opening with introductions and agenda review"],
-  "participants": ["SPEAKER_00 (Name - Affiliation, role in meeting)"],
+  "participants": ["SPEAKER_00 (Name) — append ', role' or ', organisation' ONLY if explicitly stated in the call, otherwise give just the name"],
   "next_steps": ["Concrete action with owner and timeframe"],
   "open_questions": ["Unresolved item deferred for later"]{extra_fields}
 }}
@@ -243,8 +243,13 @@ QUALITY RULES:{extra_rules}
 - Use peoples names when identified, not just speaker labels.
 - Professional third-person prose. NO greetings, NO letter format, NO filler words at the start of fields.
 - ONLY valid JSON output. No markdown, no code fences, no explanation outside the JSON.
-- Use only Latin characters. Timestamps: "HH:MM:SS". Do NOT invent facts.
-- Every field in the schema must be present. Every array must have entries (not empty).
+- Use only Latin characters. Timestamps: "HH:MM:SS".
+- CRITICAL — do NOT invent or guess any facts not stated in the transcript. In
+  particular NEVER fabricate company names, organisations, job titles or roles.
+  If a person's company/role was not stated, give only their name. Never use
+  placeholder names like "XYZ Corp", "ACME", "ABC GmbH".
+- Every field in the schema must be present. Arrays may be empty if the
+  transcript genuinely contains nothing for them — do NOT pad with invented items.
 
 TRANSCRIPT:
 {{transcript}}"""
@@ -269,7 +274,7 @@ Return ONLY this JSON structure (no markdown, no explanation):
   ],
   "key_decisions": ["What was decided, with context."],
   "timeline": ["00:00-03:12: Brief description of this segment"],
-  "participants": ["Name (Role/Affiliation)"],
+  "participants": ["Name (add role/org ONLY if explicitly stated, never invent)"],
   "next_steps": ["Action with owner and timeframe"],
   "open_questions": ["Unresolved question"]
 }}
@@ -301,7 +306,7 @@ Gib NUR diese JSON-Struktur zurueck (kein Markdown, keine Erklaerung):
   ],
   "key_decisions": ["Was wurde entschieden, mit Kontext."],
   "timeline": ["00:00-03:12: Kurze Beschreibung dieses Abschnitts"],
-  "participants": ["Name (Rolle/Organisation)"],
+  "participants": ["Name (Rolle/Organisation NUR wenn genannt, niemals erfinden)"],
   "next_steps": ["Massnahme mit Verantwortlichem und Zeitrahmen"],
   "open_questions": ["Offene Frage"]
 }}
@@ -351,7 +356,7 @@ def _build_prompt_de(tier: dict, duration_mins: int, extras: bool = False,
 Dieses Meeting dauert ca. {duration_mins} Minuten. Erstelle ein JSON-Objekt mit genau dieser Struktur:
 
 {{
-  "overall_summary": "{tier['overall']}. Identifiziere Teilnehmer und Zugehoerigkeiten, beschreibe das zentrale Thema, die wichtigsten Ergebnisse und die vereinbarte Richtung. Fachbegriffe in Anfuehrungszeichen.",
+  "overall_summary": "{tier['overall']}. Nenne die Teilnehmer mit den im Gespraech tatsaechlich verwendeten Namen (Rolle oder Organisation NUR wenn ausdruecklich genannt — niemals raten), beschreibe das zentrale Thema, die wichtigsten Ergebnisse und die vereinbarte Richtung. Fachbegriffe in Anfuehrungszeichen.",
   "key_topics": [
     {{
       "name": "Beschreibender Thementitel",
@@ -370,7 +375,7 @@ Dieses Meeting dauert ca. {duration_mins} Minuten. Erstelle ein JSON-Objekt mit 
   ],
   "key_decisions": ["Klare Aussage was entschieden wurde mit Kontext und Bedingungen."],
   "timeline": ["00:00-03:12: Eroeffnung mit Vorstellungen und Agenda-Review"],
-  "participants": ["SPEAKER_00 (Name - Zugehoerigkeit, Rolle im Meeting)"],
+  "participants": ["SPEAKER_00 (Name) — ', Rolle' oder ', Organisation' NUR anhaengen, wenn im Gespraech ausdruecklich genannt, sonst nur den Namen"],
   "next_steps": ["Konkreter naechster Schritt mit Verantwortlichem und Zeitrahmen"],
   "open_questions": ["Ungeklaerter Punkt, verschoben auf spaeter"]{extra_fields}
 }}
@@ -384,8 +389,13 @@ QUALITAETSREGELN:{extra_rules}
 - Namen der Personen verwenden wenn identifiziert, nicht nur Speaker-Labels.
 - Professionelle dritte Person. KEINE Anreden, KEIN Briefformat, KEINE Fuellwoerter am Feldanfang.
 - NUR valides JSON. Kein Markdown, keine Code-Bloecke, keine Erklaerung ausserhalb des JSON.
-- Nur lateinische Zeichen plus Umlaute. Zeitstempel: "HH:MM:SS". KEINE Fakten erfinden.
-- Jedes Feld im Schema muss vorhanden sein. Jedes Array muss Eintraege haben (nicht leer).
+- Nur lateinische Zeichen plus Umlaute. Zeitstempel: "HH:MM:SS".
+- WICHTIG — KEINE Fakten erfinden oder raten, die nicht im Transkript stehen.
+  Insbesondere NIEMALS Firmennamen, Organisationen, Jobtitel oder Rollen erfinden.
+  Wenn Firma/Rolle einer Person nicht genannt wurde, nur den Namen angeben.
+  Niemals Platzhalter-Namen wie "XYZ Corp", "ACME", "ABC GmbH" verwenden.
+- Jedes Feld im Schema muss vorhanden sein. Arrays duerfen leer sein, wenn das
+  Transkript dazu wirklich nichts enthaelt — NICHT mit erfundenen Eintraegen fuellen.
 
 TRANSKRIPT:
 {{transcript}}"""
@@ -418,6 +428,7 @@ async def _call_openai_compatible(
     response_format: str = "json_object",
     temperature: float | None = None,
     max_tokens_override: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Call an OpenAI-compatible API (DGX Spark, vLLM, etc.) and return raw text.
 
@@ -436,12 +447,12 @@ async def _call_openai_compatible(
     if HAS_OPENAI:
         return await _call_via_openai_sdk(
             prompt, base_url, api_key, model, max_retries, detail_level,
-            response_format, temperature, max_tokens_override,
+            response_format, temperature, max_tokens_override, reasoning_effort,
         )
     if HAS_HTTPX:
         return await _call_via_httpx(
             prompt, base_url, api_key, model, max_retries, detail_level,
-            response_format, temperature, max_tokens_override,
+            response_format, temperature, max_tokens_override, reasoning_effort,
         )
     raise RuntimeError(
         "Either 'openai' or 'httpx' package is required for OpenAI-compatible backend"
@@ -621,6 +632,21 @@ async def _truncate_transcript_to_fit(
     return formatted
 
 
+def _effective_reasoning_effort(model: str, explicit: str | None) -> str | None:
+    """Decide the reasoning_effort to send.
+
+    gpt-oss is a reasoning model; with no bound it spends the whole output
+    budget on the reasoning channel and returns empty content. For this app's
+    structured/factual tasks (extraction, summaries, translation) "low" is both
+    reliable and faster. An explicit value always wins. Non-gpt-oss models get
+    nothing (the param is ignored by them anyway)."""
+    if explicit:
+        return explicit
+    if "gpt-oss" in (model or "").lower():
+        return "low"
+    return None
+
+
 async def _call_via_openai_sdk(
     prompt: str, base_url: str, api_key: str, model: str,
     max_retries: int = 3,
@@ -628,10 +654,12 @@ async def _call_via_openai_sdk(
     response_format: str = "json_object",
     temperature: float | None = None,
     max_tokens_override: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Call via openai SDK with manual gen_ai.* span attributes for Instana."""
     max_tokens = max_tokens_override or _max_tokens_for_model(model, base_url, detail_level)
     temp = 0.1 if temperature is None else temperature
+    effort = _effective_reasoning_effort(model, reasoning_effort)
     client = AsyncOpenAI(
         base_url=base_url.rstrip("/"),
         api_key=api_key if api_key and api_key != "none" else "not-needed",
@@ -666,6 +694,13 @@ async def _call_via_openai_sdk(
                     "chat_template_kwargs": {"enable_thinking": False},
                 },
             }
+            # gpt-oss is a reasoning model: without a bounded reasoning_effort it
+            # can burn the whole max_tokens budget on the reasoning channel and
+            # return EMPTY content (finish_reason=length, content_len=0) → JSON
+            # parse failures. Inject reasoning_effort so the final channel is
+            # actually produced.
+            if effort:
+                sdk_kwargs["extra_body"]["reasoning_effort"] = effort
             # Only enforce JSON when the caller asked for it. Free-form tasks
             # (translation, etc.) pass response_format="text".
             if response_format == "json_object":
@@ -734,6 +769,7 @@ async def _call_via_httpx(
     response_format: str = "json_object",
     temperature: float | None = None,
     max_tokens_override: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Fallback: raw httpx call (no traceloop LLM instrumentation)."""
     import asyncio as _aio
@@ -754,6 +790,9 @@ async def _call_via_httpx(
         "repetition_penalty": 1.1,
         "chat_template_kwargs": {"enable_thinking": False},
     }
+    effort = _effective_reasoning_effort(model, reasoning_effort)
+    if effort:
+        payload["reasoning_effort"] = effort
     if response_format == "json_object":
         payload["response_format"] = {"type": "json_object"}
 

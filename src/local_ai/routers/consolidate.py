@@ -241,10 +241,12 @@ async def api_consolidate(
         # Optionally file the result into a project (markdown body kept verbatim)
         saved_project_name = ""
         if target_project:
+            section = {"summary": "overview", "product_spec": "requirements",
+                       "project_spec": "documents"}.get(output_type, "documents")
             await db.add_project_doc(
                 project_id=target_project["id"], user_id=user["id"],
                 title=title, content=markdown,
-                doc_type=output_type, source="consolidator", fmt="md",
+                doc_type=output_type, section=section, source="consolidator", fmt="md",
             )
             saved_project_name = target_project["name"]
 

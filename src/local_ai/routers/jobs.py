@@ -406,7 +406,7 @@ async def job_to_project(
     await db.add_project_doc(
         project_id=project_id, user_id=user["id"],
         title=title, content=markdown,
-        doc_type="minutes", source="meeting", fmt="md",
+        doc_type="minutes", section="minutes", source="meeting", fmt="md",
     )
     return {"ok": True, "project_id": project_id, "project_name": project["name"]}
 

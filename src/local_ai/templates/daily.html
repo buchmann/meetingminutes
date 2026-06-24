@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Daily Check-in — local-ai{% endblock %}
+{% block content %}
+
+<article>
+    <header>
+        <h2>Daily Check-in</h2>
+        <small>Erzähl kurz, wie dein Tag war und woran du gearbeitet hast. Am Ende
+        halte ich es fest — als Logbuch in den passenden Projekten und im Tagebuch.</small>
+    </header>
+
+    <div id="daily-messages" style="display:flex;flex-direction:column;gap:0.6rem;margin:0.5rem 0;max-height:50vh;overflow-y:auto"></div>
+
+    <div id="daily-input" style="display:flex;gap:0.5rem;align-items:flex-end">
+        <textarea id="daily-text" rows="2" placeholder="Woran hast du heute gearbeitet?" style="margin:0;flex:1"></textarea>
+        <button id="daily-send" onclick="sendMessage()" style="margin:0;width:auto">Senden</button>
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap">
+        <button id="daily-finish" class="secondary" onclick="finishDay()" style="margin:0;width:auto">Tag abschließen &amp; festhalten</button>
+        <button class="secondary outline" onclick="location.reload()" style="margin:0;width:auto">Neu starten</button>
+    </div>
+
+    <div id="daily-proposal" style="display:none;margin-top:1rem"></div>
+    <div id="daily-result" style="display:none;margin-top:1rem"></div>
+</article>
+
+{% if recent_logs %}
+<article>
+    <header><strong>Tagebuch</strong> <small style="color:var(--muted-color,#888)">(letzte Einträge)</small></header>
+    {% for log in recent_logs %}
+    <div style="padding:0.4rem 0;border-bottom:1px solid var(--pico-muted-border-color,#eee)">
+        <small style="color:var(--muted-color,#888)">{{ log.day }}</small>
+        <div style="white-space:pre-wrap">{{ log.content }}</div>
+    </div>
+    {% endfor %}
+</article>
+{% endif %}
+
+<script>
+const PROJECTS = [{% for p in projects %}{id:"{{ p.id }}", name:"{{ p.name|replace('"','\\"') }}"}{{ "," if not loop.last }}{% endfor %}];
+let history = [];
+
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function render() {
+    const box = document.getElementById('daily-messages');
+    box.innerHTML = history.map(m => {
+        const me = m.role === 'user';
+        return `<div style="align-self:${me?'flex-end':'flex-start'};max-width:85%;
+            background:${me?'var(--pico-primary-background,#1565c0)':'var(--pico-card-sectioning-background-color,rgba(128,128,128,0.1))'};
+            color:${me?'var(--pico-primary-inverse,#fff)':'inherit'};
+            padding:0.5rem 0.8rem;border-radius:0.8rem;white-space:pre-wrap">${esc(m.content)}</div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+}
+
+// Friendly opening line
+history.push({role:'assistant', content:'Hey! 👋 Wie war dein Tag — woran hast du gearbeitet?'});
+render();
+
+async function sendMessage() {
+    const ta = document.getElementById('daily-text');
+    const txt = ta.value.trim();
+    if (!txt) return;
+    const btn = document.getElementById('daily-send');
+    history.push({role:'user', content:txt});
+    ta.value = ''; render();
+    btn.disabled = true; btn.setAttribute('aria-busy','true');
+    try {
+        const r = await fetch('/api/daily/chat', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({history})});
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Fehler');
+        history.push({role:'assistant', content: d.reply || '…'});
+        render();
+    } catch(e) {
+        history.push({role:'assistant', content:'⚠ '+e.message}); render();
+    } finally { btn.disabled=false; btn.removeAttribute('aria-busy'); ta.focus(); }
+}
+document.getElementById('daily-text').addEventListener('keydown', e=>{
+    if (e.key==='Enter' && (e.metaKey||e.ctrlKey)) { e.preventDefault(); sendMessage(); }
+});
+
+async function finishDay() {
+    const btn = document.getElementById('daily-finish');
+    if (!history.some(m=>m.role==='user')) { alert('Erzähl erst kurz von deinem Tag.'); return; }
+    btn.disabled=true; btn.setAttribute('aria-busy','true');
+    try {
+        const r = await fetch('/api/daily/finalize', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({history})});
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Fehler');
+        renderProposal(d.proposal);
+    } catch(e) { alert('Konnte den Tag nicht zusammenfassen: '+e.message); }
+    finally { btn.disabled=false; btn.removeAttribute('aria-busy'); }
+}
+
+function projectOptions(sel){
+    let o = `<option value="">— neues/ kein Projekt —</option>`;
+    for (const p of PROJECTS) o += `<option value="${esc(p.name)}" ${p.name===sel?'selected':''}>${esc(p.name)}</option>`;
+    return o;
+}
+
+function renderProposal(p) {
+    const el = document.getElementById('daily-proposal');
+    let html = `<article style="border:1px solid var(--pico-primary,#1565c0)">
+        <header><strong>Vorschlag — bitte prüfen &amp; anpassen</strong></header>
+        <label>Tagebuch-Eintrag
+            <textarea id="prop-summary" rows="3">${esc(p.daily_summary||'')}</textarea>
+        </label>
+        <div id="prop-updates">`;
+    (p.updates||[]).forEach((u,i)=>{
+        const existing = u.project || '';
+        const newName = u.new_project || '';
+        html += `<article data-idx="${i}" style="margin:0.5rem 0">
+            <label style="display:flex;align-items:center;gap:0.5rem;margin:0">
+                <input type="checkbox" class="prop-keep" checked> übernehmen
+            </label>
+            <div class="grid">
+                <label>Projekt (bestehend)
+                    <select class="prop-project">${projectOptions(existing)}</select>
+                </label>
+                <label>…oder neues Projekt anlegen
+                    <input type="text" class="prop-newproject" value="${esc(newName)}" placeholder="Name (leer = keins)">
+                </label>
+            </div>
+            <label>Logbuch-Eintrag
+                <textarea class="prop-logbook" rows="2">${esc(u.logbook||'')}</textarea>
+            </label>
+            <label>TODOs <small>(eine pro Zeile)</small>
+                <textarea class="prop-todos" rows="2">${esc((u.todos||[]).join('\n'))}</textarea>
+            </label>
+        </article>`;
+    });
+    if (!(p.updates||[]).length) html += `<small>Keine Projekt-Updates erkannt — nur das Tagebuch wird gespeichert.</small>`;
+    html += `</div>
+        <button onclick="applyProposal()" style="margin-top:0.6rem">Übernehmen</button>
+        <span id="prop-msg" style="margin-left:0.6rem"></span>
+    </article>`;
+    el.innerHTML = html; el.style.display='block';
+    el.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+async function applyProposal() {
+    const updates = [];
+    document.querySelectorAll('#prop-updates article[data-idx]').forEach(card=>{
+        if (!card.querySelector('.prop-keep').checked) return;
+        const proj = card.querySelector('.prop-project').value.trim();
+        const newp = card.querySelector('.prop-newproject').value.trim();
+        const logbook = card.querySelector('.prop-logbook').value.trim();
+        const todos = card.querySelector('.prop-todos').value.split('\n').map(s=>s.trim()).filter(Boolean);
+        if (!logbook && !todos.length && !newp) return;
+        updates.push({project: newp?null:(proj||null), new_project: newp||null,
+                      new_project_description:'', logbook, todos});
+    });
+    const proposal = {daily_summary: document.getElementById('prop-summary').value.trim(), updates};
+    const msg = document.getElementById('prop-msg');
+    msg.textContent='Speichere…';
+    try {
+        const r = await fetch('/api/daily/apply', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({proposal})});
+        const d = await r.json();
+        if (!r.ok || !d.ok) throw new Error(d.detail||'Fehler');
+        const w = d.written;
+        document.getElementById('daily-proposal').style.display='none';
+        const res = document.getElementById('daily-result');
+        res.innerHTML = `<article style="border:1px solid #2d6a4f">
+            <strong>✓ Festgehalten.</strong><br>
+            <small>${w.logbook} Logbuch-Eintrag/e · ${w.todos} TODO(s) · `
+            + `${w.new_projects.length? 'neue Projekte: '+w.new_projects.map(esc).join(', ')+' · ':''}`
+            + `${w.journal?'Tagebuch aktualisiert':'kein Tagebuch'}`
+            + `${w.projects_touched.length? ' · Projekte: '+w.projects_touched.map(esc).join(', '):''}</small><br>
+            <a href="/projects" role="button" class="outline" style="margin-top:0.5rem">Zu den Projekten</a>
+        </article>`;
+        res.style.display='block'; res.scrollIntoView({behavior:'smooth',block:'nearest'});
+    } catch(e){ msg.textContent='✕ '+e.message; }
+}
+</script>
+{% endblock %}

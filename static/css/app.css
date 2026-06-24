@@ -564,3 +564,50 @@ header nav .nav-menu > li > small {
     line-height: 1.1;
 }
 .proj-timeline-body { flex: 1; }
+
+/* ── Project sections (structured project view) ─────────────────────── */
+.proj-section { margin-bottom: 0.5rem; }
+.proj-section > summary { font-size: 1rem; cursor: pointer; }
+.doc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;                 /* actions drop below the title on narrow widths */
+    gap: 0.4rem 0.6rem;
+    padding: 0.4rem 0.2rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+}
+.doc-row:last-of-type { border-bottom: none; }
+.doc-row a { text-decoration: none; }
+/* the actions cell: keep its controls compact + inline (Pico otherwise renders
+   forms/buttons/selects as full-width blocks → stray wide empty boxes) */
+.doc-row .doc-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+}
+.doc-row .doc-actions form {
+    display: inline-flex;
+    margin: 0;
+    padding: 0;
+    background: none;
+    width: auto;
+}
+.doc-row .doc-actions select,
+.doc-row .doc-actions button {
+    display: inline-block;
+    width: auto;
+    margin: 0;
+    height: auto;
+}
+.doc-row .doc-actions select {
+    font-size: 0.72rem;
+    padding: 0.12rem 1.3rem 0.12rem 0.4rem;
+    background-position: right 0.4rem center;
+}
+.doc-row .doc-actions button {
+    padding: 0.05rem 0.5rem;
+    font-size: 0.78rem;
+    line-height: 1.4;
+}

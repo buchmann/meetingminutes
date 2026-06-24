@@ -17,15 +17,16 @@ Local, privacy-first meeting transcription app. Upload or record audio, get spea
 - **Translator** — EN↔DE for pasted text or whole documents
 - **Consolidator** — combine several meetings + documents into one summary / product spec / project spec
 
-**Projects** — a workspace grouping a description plus generated or uploaded documents; the Consolidator can save its output straight into a project
+**Projects** — a workspace with a reusable section structure (Overview, Logbook, Meeting Minutes, Use Cases, Product Requirements, TODOs, Documents) plus a cross-section timeline and full-text search. Meeting minutes, Consolidator output and the Daily Check-in all file themselves into the right section.
 
 **PA (Personal Assistant)**
+- **Daily Check-in** — conversational daily companion ("how was your day?") that, from a short chat, proposes structured updates and — after your confirmation — writes per-project logbook entries + TODOs, creates new projects, and keeps a global journal
 - **Web Search** — ad-free results via self-hosted SearXNG, with an optional cited LLM answer
 - **Notes & Manuals** — hybrid semantic (bge-m3 embeddings) / keyword RAG over your uploaded docs
 - **E-Mail digest** — weekly "important mail" digest across Gmail/Yahoo/T-Online over IMAP (read-only + reply)
 - **Immobilien** — landlord module: check a Hausgeld statement for apportionability (BetrKV) + arithmetic
 
-**Platform** — multi-user auth (private + shared areas), per-feature creativity/temperature dial, TLS, live GPU monitoring dashboard, OpenTelemetry/Instana tracing
+**Platform** — switchable LLM in Settings (gpt-oss-120b default ⇄ Granite, admin), multi-user auth (private + shared areas), per-feature creativity/temperature dial, TLS, live GPU monitoring dashboard, OpenTelemetry/Instana tracing
 
 ## Architecture
 

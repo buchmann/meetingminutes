@@ -43,9 +43,37 @@ DOC_TYPE_LABELS = {
     "product_spec": "Product Spec",
     "project_spec": "Project Spec",
     "minutes": "Meeting Minutes",
+    "logbook": "Logbook",
+    "usecase": "Use Case",
+    "requirement": "Requirement",
+    "todo": "TODO",
     "note": "Note",
     "upload": "Upload",
     "document": "Document",
+}
+
+# Reusable project structure — the SAME sections for every project.
+PROJECT_SECTIONS = [
+    {"key": "overview",     "label": "Overview & Summaries", "icon": "▣",
+     "hint": "Where the project stands — condensed summaries & status."},
+    {"key": "logbook",      "label": "Logbook",              "icon": "▦",
+     "hint": "Dated entries — what happened over time (the daily check-in writes here)."},
+    {"key": "minutes",      "label": "Meeting Minutes",      "icon": "✎",
+     "hint": "Notes, discussions and decisions from meetings."},
+    {"key": "usecases",     "label": "Use Cases",            "icon": "◆",
+     "hint": "Use cases and the work on them."},
+    {"key": "requirements", "label": "Product Requirements", "icon": "❏",
+     "hint": "What the product must do."},
+    {"key": "todos",        "label": "TODOs / Action Items", "icon": "☑",
+     "hint": "Open tasks and follow-ups."},
+    {"key": "documents",    "label": "Project Documents",    "icon": "🗎",
+     "hint": "Specs, uploads, references and everything else."},
+]
+SECTION_KEYS = {s["key"] for s in PROJECT_SECTIONS}
+# default doc_type per section (for docs created directly in a section)
+SECTION_DEFAULT_DOCTYPE = {
+    "overview": "summary", "logbook": "logbook", "minutes": "minutes", "usecases": "usecase",
+    "requirements": "requirement", "todos": "todo", "documents": "document",
 }
 
 
@@ -78,11 +106,19 @@ async def project_detail_page(project_id: str, request: Request, q: str = "",
                               user: dict = Depends(require_user)):
     db = request.app.state.db
     project = await _owned_project(db, project_id, user)
-    # Chronological history: oldest first.
+    # Chronological history: oldest first (used by the Timeline view).
     docs = await db.list_project_docs(project_id, user["id"], order="asc")
+    # Group docs by section for the structured view (newest first within a section).
+    grouped: dict[str, list] = {s["key"]: [] for s in PROJECT_SECTIONS}
+    for d in reversed(docs):  # docs is asc → reversed = newest first
+        key = d.get("section") or "documents"
+        if key not in grouped:
+            key = "documents"
+        grouped[key].append(d)
     return request.app.state.templates.TemplateResponse(
         request, "project_detail.html",
         {"user": user, "project": project, "docs": docs,
+         "sections": PROJECT_SECTIONS, "grouped": grouped,
          "doc_type_labels": DOC_TYPE_LABELS, "q": (q or "").strip()},
     )
 
@@ -160,6 +196,7 @@ async def api_add_doc(
     request: Request,
     title: str = Form(default=""),
     content: str = Form(default=""),
+    section: str = Form(default="documents"),
     files: list[UploadFile] = Form(default=[]),  # noqa: B008
     user: dict = Depends(require_user),
 ):
@@ -167,6 +204,8 @@ async def api_add_doc(
     db = request.app.state.db
     await _owned_project(db, project_id, user)
 
+    section = section if section in SECTION_KEYS else "documents"
+    doc_type = SECTION_DEFAULT_DOCTYPE.get(section, "document")
     files = [f for f in (files or []) if f and getattr(f, "filename", None)]
     content = (content or "").strip()
     added = 0
@@ -176,7 +215,7 @@ async def api_add_doc(
         await db.add_project_doc(
             project_id=project_id, user_id=user["id"],
             title=(title.strip() or "Note"), content=content,
-            doc_type="note", source="manual", fmt="md",
+            doc_type=doc_type, section=section, source="manual", fmt="md",
         )
         added += 1
 
@@ -202,13 +241,28 @@ async def api_add_doc(
             await db.add_project_doc(
                 project_id=project_id, user_id=user["id"],
                 title=(upload.filename or "Upload"), content=text,
-                doc_type="upload", source="upload", fmt="md",
+                doc_type="upload", section=section, source="upload", fmt="md",
             )
             added += 1
 
     if added == 0:
         raise HTTPException(400, "Nothing to add — paste text or choose a file.")
     return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+
+@router.post("/api/projects/docs/{doc_id}/section")
+async def api_move_doc_section(doc_id: str, request: Request,
+                               section: str = Form(...),
+                               user: dict = Depends(require_user)):
+    """Move a document into a different section of its project."""
+    db = request.app.state.db
+    doc = await db.get_project_doc(doc_id)
+    if not doc or doc.get("user_id") != user["id"]:
+        raise HTTPException(404, "Document not found.")
+    if section not in SECTION_KEYS:
+        raise HTTPException(400, "Unknown section.")
+    await db.set_project_doc_section(doc_id, user["id"], section)
+    return RedirectResponse(url=f"/projects/{doc['project_id']}", status_code=303)
 
 
 @router.get("/api/projects/docs/{doc_id}/download")

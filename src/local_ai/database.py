@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS project_docs (
     user_id     TEXT NOT NULL,
     title       TEXT NOT NULL,
     doc_type    TEXT NOT NULL DEFAULT 'document',  -- summary | product_spec | project_spec | note | upload
+    section     TEXT NOT NULL DEFAULT 'documents', -- overview|minutes|usecases|requirements|todos|documents
     source      TEXT NOT NULL DEFAULT '',          -- e.g. 'consolidator', 'upload', 'manual'
     fmt         TEXT NOT NULL DEFAULT 'md',         -- stored body is markdown/plain text
     content     TEXT NOT NULL DEFAULT '',           -- markdown / plain-text body
@@ -160,6 +161,16 @@ CREATE TABLE IF NOT EXISTS app_config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Daily companion: the global day journal (one entry per check-in) -------
+CREATE TABLE IF NOT EXISTS daily_logs (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    day        TEXT NOT NULL,         -- YYYY-MM-DD
+    content    TEXT NOT NULL DEFAULT '',  -- markdown summary of the day
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_daily_logs_user ON daily_logs(user_id);
 """
 
 
@@ -198,6 +209,21 @@ class Database:
         ucols = {row["name"] for row in await ucur.fetchall()}
         if "profile" not in ucols:
             await self._db.execute("ALTER TABLE users ADD COLUMN profile TEXT NOT NULL DEFAULT ''")
+        # project_docs.section groups docs into the reusable project structure
+        pcur = await self._db.execute("PRAGMA table_info(project_docs)")
+        pcols = {row["name"] for row in await pcur.fetchall()}
+        if pcols and "section" not in pcols:
+            await self._db.execute(
+                "ALTER TABLE project_docs ADD COLUMN section TEXT NOT NULL DEFAULT 'documents'"
+            )
+            # Backfill existing docs from their doc_type
+            for dtype, section in (
+                ("minutes", "minutes"), ("summary", "overview"),
+                ("product_spec", "requirements"), ("project_spec", "documents"),
+            ):
+                await self._db.execute(
+                    "UPDATE project_docs SET section = ? WHERE doc_type = ?", (section, dtype)
+                )
         await self._db.commit()
         # Indexes on the new columns can only be created after the columns exist
         # (so they live here rather than in SCHEMA, which runs before migration).
@@ -644,13 +670,14 @@ class Database:
 
     async def add_project_doc(self, *, project_id: str, user_id: str, title: str,
                               content: str, doc_type: str = "document",
+                              section: str = "documents",
                               source: str = "", fmt: str = "md") -> dict:
         did = secrets.token_hex(8)
         await self._db.execute(
             """INSERT INTO project_docs
-               (id, project_id, user_id, title, doc_type, source, fmt, content, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (did, project_id, user_id, title, doc_type, source, fmt, content, _now()),
+               (id, project_id, user_id, title, doc_type, section, source, fmt, content, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (did, project_id, user_id, title, doc_type, section, source, fmt, content, _now()),
         )
         await self._db.execute(
             "UPDATE projects SET updated_at = ? WHERE id = ?", (_now(), project_id)
@@ -670,12 +697,20 @@ class Database:
         """
         direction = "ASC" if order == "asc" else "DESC"
         cur = await self._db.execute(
-            f"""SELECT id, project_id, user_id, title, doc_type, source, fmt,
+            f"""SELECT id, project_id, user_id, title, doc_type, section, source, fmt,
                       LENGTH(content) AS char_count, created_at
                FROM project_docs WHERE project_id = ? AND user_id = ? ORDER BY created_at {direction}""",
             (project_id, user_id),
         )
         return [dict(r) for r in await cur.fetchall()]
+
+    async def set_project_doc_section(self, doc_id: str, user_id: str, section: str) -> bool:
+        cur = await self._db.execute(
+            "UPDATE project_docs SET section = ? WHERE id = ? AND user_id = ?",
+            (section, doc_id, user_id),
+        )
+        await self._db.commit()
+        return cur.rowcount > 0
 
     @staticmethod
     def _snippet(content: str, query: str, width: int = 140) -> str:
@@ -744,6 +779,25 @@ class Database:
         )
         await self._db.commit()
         return cur.rowcount > 0
+
+    # ── Daily companion: global day journal ──────────────────────────
+
+    async def add_daily_log(self, *, user_id: str, day: str, content: str) -> dict:
+        did = secrets.token_hex(8)
+        await self._db.execute(
+            "INSERT INTO daily_logs (id, user_id, day, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (did, user_id, day, content, _now()),
+        )
+        await self._db.commit()
+        cur = await self._db.execute("SELECT * FROM daily_logs WHERE id = ?", (did,))
+        return dict(await cur.fetchone())
+
+    async def list_daily_logs(self, user_id: str, limit: int = 14) -> list[dict]:
+        cur = await self._db.execute(
+            "SELECT * FROM daily_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit),
+        )
+        return [dict(r) for r in await cur.fetchall()]
 
     # ── App config (key/value) ───────────────────────────────────────
 

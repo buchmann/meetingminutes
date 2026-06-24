@@ -138,7 +138,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     from local_ai.routers import (
-        chat, consolidate, documents, email, immo, jobs, notes, pages, exports,
+        chat, consolidate, daily, documents, email, immo, jobs, notes, pages, exports,
         projects, translate, websearch,
     )
     app.include_router(pages.router)
@@ -153,5 +153,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(notes.router)
     app.include_router(immo.router)
     app.include_router(projects.router)
+    app.include_router(daily.router)
 
     return app

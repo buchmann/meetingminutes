@@ -135,6 +135,7 @@ flowchart LR
         PR["Project: description + docs<br/>download docx/pdf/md/txt"]
     end
     subgraph PA["PA (Personal Assistant)"]
+        DC2["Daily Check-in<br/>chat → project updates + journal"]
         WS["Web Search"]
         NK["Notes &amp; Manuals (RAG)"]
         ED["E-Mail digest"]

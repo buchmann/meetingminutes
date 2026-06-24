@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from local_ai.services.summarizer import _call_openai_compatible, _call_ollama
 
@@ -139,12 +140,15 @@ def _extract_prompt(text: str) -> str:
     )
 
 
-# Granite-Kontext 8k. Mit max_tokens_override=1200 passt ~17000 Zeichen in EINEN
-# Aufruf → kein Chunk-Doppelzählen. Nur sehr lange Abrechnungen werden zerlegt.
+# Beide Modelle laufen mit 32k Kontext (Granite + gpt-oss). Ein Aufruf reicht für
+# ~13000 Zeichen; nur sehr lange Abrechnungen werden zerlegt.
 _EXTRACT_SINGLE_CHARS = 13000
 _EXTRACT_CHUNK_CHARS = 11000
 _EXTRACT_MAX_CHUNKS = 6
-_EXTRACT_MAX_TOKENS = 1500
+# gpt-oss ist ein Reasoning-Modell: bei zu kleinem Budget verbraucht es alles im
+# Reasoning-Kanal → leerer content → JSONDecodeError. 4000 + reasoning_effort=low
+# (vom Summarizer für gpt-oss automatisch) lassen genug Platz für das JSON.
+_EXTRACT_MAX_TOKENS = 4000
 
 
 def _focus_relevant(text: str) -> str:
@@ -161,17 +165,38 @@ def _focus_relevant(text: str) -> str:
     return text
 
 
+def _loads_json_lenient(raw: str) -> dict:
+    """Parse JSON robustly: strip <think> blocks and ``` fences, and fall back
+    to the first '{' … last '}' substring if the model added stray prose."""
+    s = (raw or "").strip()
+    if not s:
+        raise json.JSONDecodeError("Empty LLM response", s or "", 0)
+    s = re.sub(r"<think>.*?</think>", "", s, flags=re.DOTALL).strip()
+    # strip ```json ... ``` fences
+    m = re.search(r"```(?:json)?\s*(.*?)```", s, flags=re.DOTALL)
+    if m:
+        s = m.group(1).strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        # last resort: take the outermost {...}
+        i, j = s.find("{"), s.rfind("}")
+        if i != -1 and j > i:
+            return json.loads(s[i:j + 1])
+        raise
+
+
 async def _extract_one(chunk: str, llm: dict) -> dict:
     prompt = _extract_prompt(chunk)
     if llm["backend"] == "openai":
         raw = await _call_openai_compatible(
             prompt, llm["openai_base_url"], llm["openai_api_key"], llm["openai_model"],
             response_format="json_object", temperature=0.0,
-            max_tokens_override=_EXTRACT_MAX_TOKENS,
+            max_tokens_override=_EXTRACT_MAX_TOKENS, reasoning_effort="low",
         )
     else:
         raw = await _call_ollama(prompt, llm["ollama_base_url"], llm["ollama_model"], 0.0)
-    return json.loads(raw)
+    return _loads_json_lenient(raw)
 
 
 def _norm_name(s: str) -> str:

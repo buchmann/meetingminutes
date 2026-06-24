@@ -35,7 +35,11 @@
 
 <article>
     <header style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
-        <strong>History</strong> <small style="color:var(--muted-color,#888)">({{ docs|length }} document{{ '' if docs|length == 1 else 's' }}, oldest first)</small>
+        <strong>Structure</strong> <small style="color:var(--muted-color,#888)">({{ docs|length }} item{{ '' if docs|length == 1 else 's' }})</small>
+        <div role="group" style="margin:0;width:auto">
+            <button id="view-sections-btn" class="outline" style="margin:0" onclick="setView('sections')">Sections</button>
+            <button id="view-timeline-btn" class="outline secondary" style="margin:0" onclick="setView('timeline')">Timeline</button>
+        </div>
     </header>
 
     <form role="search" onsubmit="searchDocs(event)" style="display:flex;gap:0.5rem;margin:0.4rem 0">
@@ -46,94 +50,129 @@
 
     <div id="doc-search-results" style="display:none;margin:0.5rem 0"></div>
 
-    <div id="doc-timeline">
-    {% if docs %}
-    <div class="proj-timeline">
-        {% for d in docs %}
-        <div class="proj-timeline-entry">
-            <div class="proj-timeline-date"><small>{{ d.created_at[:10] }}<br><span style="opacity:0.6">{{ d.created_at[11:16] }}</span></small></div>
-            <div class="proj-timeline-body">
-                <div>
-                    <strong>{{ d.title }}</strong>
-                    <span class="tag" style="font-size:0.7em">{{ doc_type_labels.get(d.doc_type, d.doc_type) }}</span>
-                    {% if d.source %}<small style="color:var(--muted-color,#888)"> · via {{ d.source }}</small>{% endif %}
-                </div>
-                <small>
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=docx">docx</a> ·
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=pdf">pdf</a> ·
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=md">md</a> ·
-                    <a href="/api/projects/docs/{{ d.id }}/download?format=txt">txt</a>
-                    <form method="post" action="/api/projects/docs/{{ d.id }}/delete" style="display:inline;margin-left:0.5rem"
-                          onsubmit="return confirm('Delete this document?')">
-                        <button type="submit" class="secondary outline" style="margin:0;padding:0 0.4rem;font-size:0.7rem">✕</button>
-                    </form>
-                </small>
-            </div>
+    {# ── Macro: one document row (used in sections + search) ── #}
+    {% macro doc_row(d) %}
+    <div class="doc-row">
+        <div style="flex:1 1 14rem;min-width:0">
+            <strong>{{ d.title }}</strong>
+            <span class="tag" style="font-size:0.7em">{{ doc_type_labels.get(d.doc_type, d.doc_type) }}</span>
+            {% if d.source %}<small style="color:var(--muted-color,#888)"> · via {{ d.source }} · {{ d.created_at[:10] }}</small>{% endif %}
         </div>
+        <span class="doc-actions">
+            <small style="white-space:nowrap">
+                <a href="/api/projects/docs/{{ d.id }}/download?format=docx">docx</a> ·
+                <a href="/api/projects/docs/{{ d.id }}/download?format=pdf">pdf</a> ·
+                <a href="/api/projects/docs/{{ d.id }}/download?format=md">md</a>
+            </small>
+            <form method="post" action="/api/projects/docs/{{ d.id }}/section">
+                <select name="section" onchange="this.form.submit()" title="Move to section">
+                    {% for s2 in sections %}<option value="{{ s2.key }}" {% if s2.key == d.section %}selected{% endif %}>{{ s2.label }}</option>{% endfor %}
+                </select>
+            </form>
+            <form method="post" action="/api/projects/docs/{{ d.id }}/delete"
+                  onsubmit="return confirm('Delete this document?')">
+                <button type="submit" class="secondary outline" title="Delete">✕</button>
+            </form>
+        </span>
+    </div>
+    {% endmacro %}
+
+    {# ── SECTIONS VIEW (default) ── #}
+    <div id="view-sections">
+        {% for s in sections %}
+        <details class="proj-section" {% if grouped[s.key] %}open{% endif %}>
+            <summary>
+                <span style="opacity:0.7">{{ s.icon }}</span> <strong>{{ s.label }}</strong>
+                <span class="tag" style="font-size:0.7em">{{ grouped[s.key]|length }}</span>
+            </summary>
+            <small style="color:var(--muted-color,#888);display:block;margin:0.2rem 0 0.5rem">{{ s.hint }}</small>
+            {% for d in grouped[s.key] %}{{ doc_row(d) }}{% endfor %}
+            {% if not grouped[s.key] %}<small style="color:var(--muted-color,#888)">Empty.</small>{% endif %}
+            <details style="margin-top:0.5rem">
+                <summary role="button" class="secondary outline" style="padding:0.2rem 0.7rem;font-size:0.8rem">+ Add to {{ s.label }}</summary>
+                <form method="post" action="/api/projects/{{ project.id }}/docs" enctype="multipart/form-data" style="margin-top:0.6rem">
+                    <input type="hidden" name="section" value="{{ s.key }}">
+                    <input type="text" name="title" placeholder="Title (for pasted text)">
+                    <textarea name="content" rows="4" placeholder="Paste text (Markdown supported)…"></textarea>
+                    <label>…or upload files
+                        <input type="file" name="files" multiple accept=".docx,.pdf,.txt,.md">
+                    </label>
+                    <button type="submit" style="margin:0">Add</button>
+                </form>
+            </details>
+        </details>
         {% endfor %}
     </div>
-    {% else %}
-    <p><small>No documents yet. Add one below, send Consolidator output here, or save meeting minutes from a meeting.</small></p>
-    {% endif %}
+
+    {# ── TIMELINE VIEW ── #}
+    <div id="view-timeline" style="display:none">
+        {% if docs %}
+        <div class="proj-timeline">
+            {% for d in docs %}
+            <div class="proj-timeline-entry">
+                <div class="proj-timeline-date"><small>{{ d.created_at[:10] }}<br><span style="opacity:0.6">{{ d.created_at[11:16] }}</span></small></div>
+                <div class="proj-timeline-body">
+                    <div><strong>{{ d.title }}</strong>
+                        <span class="tag" style="font-size:0.7em">{{ doc_type_labels.get(d.doc_type, d.doc_type) }}</span>
+                        <small style="color:var(--muted-color,#888)"> · {{ sections | selectattr('key','equalto', d.section) | map(attribute='label') | first | default(d.section) }}{% if d.source %} · via {{ d.source }}{% endif %}</small>
+                    </div>
+                    <small>
+                        <a href="/api/projects/docs/{{ d.id }}/download?format=md">md</a> ·
+                        <a href="/api/projects/docs/{{ d.id }}/download?format=docx">docx</a> ·
+                        <a href="/api/projects/docs/{{ d.id }}/download?format=pdf">pdf</a>
+                    </small>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p><small>No items yet. Add to a section, send Consolidator output here, or save meeting minutes from a meeting.</small></p>
+        {% endif %}
     </div>
 
     <script>
         const PROJECT_ID = "{{ project.id }}";
+        let CURRENT_VIEW = 'sections';
+        function setView(v) {
+            CURRENT_VIEW = v;
+            document.getElementById('view-sections').style.display = (v === 'sections') ? 'block' : 'none';
+            document.getElementById('view-timeline').style.display = (v === 'timeline') ? 'block' : 'none';
+            document.getElementById('doc-search-results').style.display = 'none';
+            document.getElementById('view-sections-btn').className = (v === 'sections') ? 'outline' : 'outline secondary';
+            document.getElementById('view-timeline-btn').className = (v === 'timeline') ? 'outline' : 'outline secondary';
+        }
         async function searchDocs(e) {
             if (e) e.preventDefault();
             const q = document.getElementById('doc-search').value.trim();
             const results = document.getElementById('doc-search-results');
-            const timeline = document.getElementById('doc-timeline');
             if (!q) { clearDocSearch(); return; }
+            document.getElementById('view-sections').style.display = 'none';
+            document.getElementById('view-timeline').style.display = 'none';
             results.style.display = 'block';
             results.innerHTML = '<small aria-busy="true">Searching…</small>';
             try {
                 const r = await fetch(`/api/projects/${PROJECT_ID}/search?q=` + encodeURIComponent(q));
                 const data = await r.json();
-                timeline.style.display = 'none';
-                if (!data.results.length) {
-                    results.innerHTML = `<small>No documents match “${q}”.</small>`;
-                    return;
-                }
+                if (!data.results.length) { results.innerHTML = `<small>No documents match “${q}”.</small>`; return; }
                 let html = `<small style="color:var(--muted-color,#888)">${data.count} match${data.count===1?'':'es'} for “${q}”</small>`;
                 for (const d of data.results) {
                     const snip = (d.snippet || '').replace(/</g,'&lt;');
                     html += `<article style="margin:0.5rem 0;padding:0.6rem 0.8rem">
                         <div><strong>${d.title}</strong> <span class="tag" style="font-size:0.7em">${d.doc_type}</span></div>
                         <small style="color:var(--muted-color,#888)">${snip}</small><br>
-                        <small><a href="/api/projects/docs/${d.id}/download?format=md">open .md</a> · <a href="/api/projects/docs/${d.id}/download?format=docx">docx</a> · <a href="/api/projects/docs/${d.id}/download?format=pdf">pdf</a></small>
+                        <small><a href="/api/projects/docs/${d.id}/download?format=md">open .md</a> · <a href="/api/projects/docs/${d.id}/download?format=docx">docx</a></small>
                     </article>`;
                 }
                 results.innerHTML = html;
-            } catch (err) {
-                results.innerHTML = '<small>Search failed.</small>';
-            }
+            } catch (err) { results.innerHTML = '<small>Search failed.</small>'; }
         }
         function clearDocSearch() {
             document.getElementById('doc-search').value = '';
             document.getElementById('doc-search-results').style.display = 'none';
-            document.getElementById('doc-timeline').style.display = 'block';
+            setView(CURRENT_VIEW);
         }
-        // Auto-run search if arriving with a ?q= from the projects list
         if ("{{ q or '' }}".trim()) { searchDocs(); }
     </script>
-
-    <details style="margin-top:1rem">
-        <summary role="button" class="secondary outline">+ Add document</summary>
-        <form method="post" action="/api/projects/{{ project.id }}/docs" enctype="multipart/form-data" style="margin-top:0.8rem">
-            <label>Title <small>(for pasted text)</small>
-                <input type="text" name="title" placeholder="e.g. Kickoff notes">
-            </label>
-            <label>Paste text <small>(Markdown supported)</small>
-                <textarea name="content" rows="5" placeholder="Paste content here…"></textarea>
-            </label>
-            <label>…or upload files
-                <input type="file" name="files" multiple accept=".docx,.pdf,.txt,.md">
-                <small>Word, PDF, Markdown or text — up to 25 MB each.</small>
-            </label>
-            <button type="submit">Add to project</button>
-        </form>
-    </details>
 </article>
 
 {% endblock %}

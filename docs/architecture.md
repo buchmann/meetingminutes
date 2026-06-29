@@ -31,7 +31,7 @@ local-ai-app/
 │   │   ├── documents.py             # Document Checker (extract → improve → docx/pdf/md)
 │   │   ├── translate.py             # Translator EN↔DE (text + documents)
 │   │   ├── consolidate.py          # Consolidator (N sources → spec; → project)
-│   │   ├── projects.py             # Projects: workspace of description + docs
+│   │   ├── projects.py             # Projects: sections + timeline + search; auto-title on add
 │   │   ├── websearch.py            # Web Search via SearXNG + cited LLM answer
 │   │   ├── notes.py                 # Notes & Manuals (hybrid RAG search)
 │   │   ├── email.py                 # E-Mail weekly digest (IMAP, read-only + reply)
@@ -132,7 +132,7 @@ flowchart LR
         CO["Consolidator<br/>summary / product / project spec"]
     end
     subgraph PROJ["Projects"]
-        PR["Project: description + docs<br/>download docx/pdf/md/txt"]
+        PR["Project: 7 sections + timeline + search<br/>auto-title on add · download docx/pdf/md/txt"]
     end
     subgraph PA["PA (Personal Assistant)"]
         DC2["Daily Check-in<br/>chat → project updates + journal"]
@@ -357,6 +357,8 @@ Transcripts exceeding the budget are truncated. Switching between models require
 **LLM call chain**: OpenAI SDK (preferred, auto-instrumented) → httpx fallback → Ollama fallback.
 
 **Post-processing**: Cleans garbled characters (MoE models sometimes inject Arabic/Greek), validates JSON, builds `SummaryResult` model.
+
+**`suggest_title(text)`**: lightweight helper that asks the LLM for a concise 3–8 word title (gpt-oss `reasoning_effort=low`), strips `<think>`/quotes/`Titel:` and caps at 80 chars (returns `""` on failure). Used by Projects' auto-title (`routers/projects.py::_auto_title`) when a doc is added with content but no title — a single short prose line is kept verbatim, anything multi-line or code-like (`_looks_like_title` rejects `= ; | { } $ \` < >`, markdown markers, …) is sent to `suggest_title`, with a truncation fallback. A per-section "Titel automatisch erzeugen (KI)" switch turns it off (first line used instead, no LLM).
 
 ### Text Improver (`services/text_improver.py`)
 

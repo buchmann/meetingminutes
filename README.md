@@ -17,7 +17,7 @@ Local, privacy-first meeting transcription app. Upload or record audio, get spea
 - **Translator** — EN↔DE for pasted text or whole documents
 - **Consolidator** — combine several meetings + documents into one summary / product spec / project spec
 
-**Projects** — a workspace with a reusable section structure (Overview, Logbook, Meeting Minutes, Use Cases, Product Requirements, TODOs, Documents) plus a cross-section timeline and full-text search. Meeting minutes, Consolidator output and the Daily Check-in all file themselves into the right section.
+**Projects** — a workspace with a reusable section structure (Overview, Logbook, Meeting Minutes, Use Cases, Product Requirements, TODOs, Documents) plus a cross-section timeline and full-text search. Meeting minutes, Consolidator output and the Daily Check-in all file themselves into the right section. Add an item with just text and no title and a title is generated automatically — a short prose line is kept as-is, longer or code-like content gets a concise LLM-generated title. Each section's add form has a "Titel automatisch erzeugen (KI)" switch (on by default; off → the first line is used as the title, no LLM call).
 
 **PA (Personal Assistant)**
 - **Daily Check-in** — conversational daily companion ("how was your day?") that, from a short chat, proposes structured updates and — after your confirmation — writes per-project logbook entries + TODOs, creates new projects, and keeps a global journal

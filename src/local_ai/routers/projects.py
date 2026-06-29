@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
@@ -37,14 +38,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# First line is reused verbatim as the title ONLY when it reads like a plain
+# title — a single short line of prose. Code/command snippets (TS=$(date …),
+# JSON, shell, markdown headers) or multi-line content go to the LLM instead.
+_CODELIKE = re.compile(r"""[=;|{}$`<>]|\$\(|\+%|/[A-Za-z]|^\s*[#\-\*>]""")
+
+
+def _looks_like_title(line: str) -> bool:
+    return bool(line) and len(line) <= 70 and not _CODELIKE.search(line)
+
+
 async def _auto_title(content: str, settings) -> str:
     """Derive a title from a doc's text when the user didn't enter one.
-    Short text → the text itself; longer → a concise LLM-generated title
-    (falls back to a truncation if the LLM is unavailable)."""
-    first = (content or "").strip().splitlines()[0].strip() if content.strip() else ""
-    if not first:
+    A single short prose line is reused as-is (instant); anything else
+    (multi-line, long, or code-like) gets a concise LLM-generated title,
+    falling back to a truncation if the LLM is unavailable."""
+    text = (content or "").strip()
+    if not text:
         return "Notiz"
-    if len(first) <= 70:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    first = lines[0] if lines else ""
+    if len(lines) == 1 and _looks_like_title(first):
         return first
     if settings.summary_backend == "openai":
         t = await suggest_title(
@@ -55,7 +69,7 @@ async def _auto_title(content: str, settings) -> str:
         )
         if t:
             return t
-    return first[:67].rstrip() + "…"
+    return first[:67].rstrip() + "…" if len(first) > 70 else (first or "Notiz")
 
 
 def _plain_title(content: str) -> str:

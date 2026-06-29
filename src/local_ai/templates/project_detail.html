@@ -94,6 +94,10 @@
                     <input type="hidden" name="section" value="{{ s.key }}">
                     <input type="text" name="title" placeholder="Titel (optional — wird sonst automatisch erzeugt)">
                     <textarea name="content" rows="4" placeholder="{% if s.key == 'todos' %}Aufgabe eingeben — Titel wird automatisch erzeugt…{% else %}Text einfügen (Markdown möglich)…{% endif %}"></textarea>
+                    <label style="font-size:0.82rem;color:var(--muted-color,#888);display:flex;align-items:center;gap:0.4rem;margin:0 0 0.5rem">
+                        <input type="checkbox" name="auto_title" value="on" checked style="margin:0;width:auto">
+                        Titel automatisch erzeugen (KI) — aus: erste Zeile als Titel
+                    </label>
                     <label>…or upload files
                         <input type="file" name="files" multiple accept=".docx,.pdf,.txt,.md">
                     </label>

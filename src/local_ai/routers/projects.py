@@ -57,6 +57,16 @@ async def _auto_title(content: str, settings) -> str:
             return t
     return first[:67].rstrip() + "…"
 
+
+def _plain_title(content: str) -> str:
+    """Title without any LLM call — just the first line (truncated). Used when
+    the section's 'Titel automatisch erzeugen' switch is turned off."""
+    first = (content or "").strip().splitlines()[0].strip() if content.strip() else ""
+    if not first:
+        return "Notiz"
+    return first if len(first) <= 80 else first[:79].rstrip() + "…"
+
+
 _ALLOWED_DOC_EXTS = {".docx", ".pdf", ".txt", ".md"}
 _MAX_DOC_BYTES = 25 * 1024 * 1024
 
@@ -219,6 +229,7 @@ async def api_add_doc(
     title: str = Form(default=""),
     content: str = Form(default=""),
     section: str = Form(default="documents"),
+    auto_title: str = Form(default="off"),
     files: list[UploadFile] = Form(default=[]),  # noqa: B008
     user: dict = Depends(require_user),
 ):
@@ -235,7 +246,12 @@ async def api_add_doc(
     # Pasted text → one doc. If no title was given, generate one from the text
     # (lets you just type a TODO and get a sensible title automatically).
     if content:
-        doc_title = title.strip() or await _auto_title(content, request.app.state.settings)
+        if title.strip():
+            doc_title = title.strip()
+        elif str(auto_title).lower() in ("on", "true", "1", "yes"):
+            doc_title = await _auto_title(content, request.app.state.settings)
+        else:
+            doc_title = _plain_title(content)
         await db.add_project_doc(
             project_id=project_id, user_id=user["id"],
             title=doc_title, content=content,

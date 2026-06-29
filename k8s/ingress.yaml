@@ -4,11 +4,14 @@ metadata:
   name: local-ai
   namespace: local-ai
   annotations:
-    # Self-signed: the lab domain resolves to a private IP, so Let's Encrypt
-    # HTTP-01 cannot validate it. Self-signed still provides an HTTPS secure
-    # context (needed for getUserMedia/clipboard) — browsers show a one-time
-    # trust prompt. Swap to letsencrypt-prod + DNS-01 for a trusted cert.
-    cert-manager.io/cluster-issuer: "selfsigned-issuer"
+    # TLS: the publicly-trusted Let's Encrypt WILDCARD (*.lab.allwaysbeginner.com)
+    # is used — NOT cert-manager. The wildcard is issued centrally by acme.sh
+    # (DNS-01 via deSEC) on kubeflow (192.168.178.97), stored in Vault KV
+    # (secret/certs/wildcard-allwaysbeginner), and copied into the local-ai-tls
+    # secret (same manual flow as bum/gitlab; ESO not yet installed). On renewal
+    # (~every 90d, currently exp 2026-09-23) re-copy the secret. Do NOT re-add a
+    # cert-manager.io/cluster-issuer annotation — it would overwrite this with a
+    # self-signed cert.
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "2g"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"

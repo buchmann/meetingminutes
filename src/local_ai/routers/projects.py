@@ -30,10 +30,32 @@ from local_ai.services.document_checker import (
     generate_markdown,
     generate_pdf,
 )
+from local_ai.services.summarizer import suggest_title
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _auto_title(content: str, settings) -> str:
+    """Derive a title from a doc's text when the user didn't enter one.
+    Short text → the text itself; longer → a concise LLM-generated title
+    (falls back to a truncation if the LLM is unavailable)."""
+    first = (content or "").strip().splitlines()[0].strip() if content.strip() else ""
+    if not first:
+        return "Notiz"
+    if len(first) <= 70:
+        return first
+    if settings.summary_backend == "openai":
+        t = await suggest_title(
+            content,
+            openai_base_url=settings.openai_base_url,
+            openai_api_key=settings.openai_api_key,
+            openai_model=settings.openai_model,
+        )
+        if t:
+            return t
+    return first[:67].rstrip() + "…"
 
 _ALLOWED_DOC_EXTS = {".docx", ".pdf", ".txt", ".md"}
 _MAX_DOC_BYTES = 25 * 1024 * 1024
@@ -210,11 +232,13 @@ async def api_add_doc(
     content = (content or "").strip()
     added = 0
 
-    # Pasted text → one doc
+    # Pasted text → one doc. If no title was given, generate one from the text
+    # (lets you just type a TODO and get a sensible title automatically).
     if content:
+        doc_title = title.strip() or await _auto_title(content, request.app.state.settings)
         await db.add_project_doc(
             project_id=project_id, user_id=user["id"],
-            title=(title.strip() or "Note"), content=content,
+            title=doc_title, content=content,
             doc_type=doc_type, section=section, source="manual", fmt="md",
         )
         added += 1

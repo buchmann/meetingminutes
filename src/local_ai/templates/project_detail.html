@@ -92,8 +92,8 @@
                 <summary role="button" class="secondary outline" style="padding:0.2rem 0.7rem;font-size:0.8rem">+ Add to {{ s.label }}</summary>
                 <form method="post" action="/api/projects/{{ project.id }}/docs" enctype="multipart/form-data" style="margin-top:0.6rem">
                     <input type="hidden" name="section" value="{{ s.key }}">
-                    <input type="text" name="title" placeholder="Title (for pasted text)">
-                    <textarea name="content" rows="4" placeholder="Paste text (Markdown supported)…"></textarea>
+                    <input type="text" name="title" placeholder="Titel (optional — wird sonst automatisch erzeugt)">
+                    <textarea name="content" rows="4" placeholder="{% if s.key == 'todos' %}Aufgabe eingeben — Titel wird automatisch erzeugt…{% else %}Text einfügen (Markdown möglich)…{% endif %}"></textarea>
                     <label>…or upload files
                         <input type="file" name="files" multiple accept=".docx,.pdf,.txt,.md">
                     </label>

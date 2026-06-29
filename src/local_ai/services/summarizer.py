@@ -1191,3 +1191,38 @@ async def summarize_selection(
         "with_examples": str(data.get("with_examples", "")).strip(),
         "without_examples": str(data.get("without_examples", "")).strip(),
     }
+
+
+# ── Short title generation (e.g. auto-title a TODO from its text) ─────────
+async def suggest_title(
+    text: str,
+    *,
+    openai_base_url: str = "",
+    openai_api_key: str = "",
+    openai_model: str = "",
+) -> str:
+    """Generate a short, plain title (3-8 words) from a longer text via the LLM.
+    Returns "" on failure so the caller can fall back to a truncation."""
+    excerpt = (text or "").strip()[:1500]
+    if not excerpt:
+        return ""
+    prompt = (
+        "Erzeuge einen kurzen, prägnanten Titel (3-8 Wörter) für die folgende "
+        "Aufgabe oder Notiz. Keine Anführungszeichen, kein abschließender Punkt, "
+        "kein Präfix wie 'Titel:'. Antworte NUR mit dem Titel in der Sprache des Textes.\n\n"
+        + excerpt
+    )
+    try:
+        raw = await _call_openai_compatible(
+            prompt, openai_base_url, openai_api_key, openai_model,
+            response_format="text", temperature=0.3,
+        )
+    except Exception as exc:
+        logger.warning("suggest_title failed: %s", exc)
+        return ""
+    raw = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL).strip()
+    title = raw.splitlines()[0].strip() if raw else ""
+    title = title.strip(' "\'`').removeprefix("Titel:").strip()
+    if len(title) > 80:
+        title = title[:77].rstrip() + "…"
+    return title

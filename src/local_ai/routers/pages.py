@@ -82,8 +82,25 @@ async def logout(request: Request):
 
 @router.get("/")
 async def index(request: Request, user: dict = Depends(require_user)):
-    # Startpage is now Web Search; the meetings app lives at /meetings.
-    return RedirectResponse(url="/search", status_code=307)
+    """Home dashboard — the orienting start page."""
+    from datetime import datetime, timezone
+    db = request.app.state.db
+    projects = await db.list_projects(user["id"])
+    open_todos = await db.count_project_docs_in_section(user["id"], "todos")
+    recent_logs = await db.list_daily_logs(user["id"], limit=3)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    journal_today = sum(1 for lg in recent_logs if lg.get("day") == today)
+    return request.app.state.templates.TemplateResponse(
+        request, "home.html",
+        {
+            "user": user,
+            "projects": projects[:6],
+            "project_count": len(projects),
+            "open_todos": open_todos,
+            "recent_logs": recent_logs,
+            "journal_today": journal_today,
+        },
+    )
 
 
 @router.get("/meetings")

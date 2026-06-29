@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Start — local-ai{% endblock %}
+{% block content %}
+
+<h2 style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem">
+    Hallo {{ user.username }} <i class="ti ti-hand-stop" style="color:var(--pico-muted-color)" aria-hidden="true"></i>
+</h2>
+
+<a href="/daily" style="text-decoration:none;color:inherit">
+<article style="display:flex;align-items:center;gap:1rem;background:var(--pico-primary-focus,rgba(21,101,192,0.10));border:1px solid var(--pico-primary,#1565c0)">
+    <i class="ti ti-heart" style="font-size:1.8rem;color:var(--pico-primary,#1565c0)" aria-hidden="true"></i>
+    <div style="flex:1;min-width:0">
+        <strong style="font-size:1.05rem">Liebling, wie war dein Tag?</strong><br>
+        <small style="color:var(--pico-muted-color)">Kurz erzählen — ich halte alles in deinen Projekten und im Tagebuch fest.</small>
+    </div>
+    <span role="button" style="white-space:nowrap"><i class="ti ti-player-play" style="vertical-align:-2px;margin-right:0.3rem" aria-hidden="true"></i>Tagescheck</span>
+</article>
+</a>
+
+<div class="grid" style="grid-template-columns:repeat(3,1fr);gap:0.8rem;margin:0.2rem 0 1.2rem">
+    <a href="/projects?q=" style="text-decoration:none;color:inherit">
+    <article style="margin:0;text-align:center">
+        <div style="font-size:1.8rem;font-weight:600">{{ open_todos }}</div>
+        <small style="color:var(--pico-muted-color)">offene TODOs</small>
+    </article></a>
+    <a href="/projects" style="text-decoration:none;color:inherit">
+    <article style="margin:0;text-align:center">
+        <div style="font-size:1.8rem;font-weight:600">{{ project_count }}</div>
+        <small style="color:var(--pico-muted-color)">aktive Projekte</small>
+    </article></a>
+    <a href="/daily" style="text-decoration:none;color:inherit">
+    <article style="margin:0;text-align:center">
+        <div style="font-size:1.8rem;font-weight:600">{{ journal_today }}</div>
+        <small style="color:var(--pico-muted-color)">Tagebuch heute</small>
+    </article></a>
+</div>
+
+<h4 style="color:var(--pico-muted-color);font-size:0.85rem;text-transform:uppercase;letter-spacing:0.03em">Schnellzugriff</h4>
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.8rem">
+    {% set tiles = [
+        ('/projects', 'ti-folder', 'Projekte', 'Logbuch, TODOs, Specs'),
+        ('/meetings', 'ti-microphone', 'Meeting aufnehmen', 'Transkript und Protokoll'),
+        ('/chat', 'ti-pencil', 'Text verbessern', 'Korrigieren, in deinem Stil'),
+        ('/translate', 'ti-language', 'Übersetzen', 'EN ↔ DE'),
+        ('/search', 'ti-search', 'Websuche', 'werbefrei, mit Quellen'),
+        ('/notes', 'ti-notebook', 'Notizen & Handbücher', 'durchsuchbares Wissen'),
+    ] %}
+    {% for href, icon, title, sub in tiles %}
+    <a href="{{ href }}" style="text-decoration:none;color:inherit">
+    <article style="margin:0;height:100%;display:flex;flex-direction:column;gap:0.3rem">
+        <i class="ti {{ icon }}" style="font-size:1.3rem;color:var(--pico-primary,#1565c0)" aria-hidden="true"></i>
+        <strong style="font-size:0.95rem">{{ title }}</strong>
+        <small style="color:var(--pico-muted-color)">{{ sub }}</small>
+    </article></a>
+    {% endfor %}
+</div>
+
+{% if recent_logs %}
+<h4 style="color:var(--pico-muted-color);font-size:0.85rem;text-transform:uppercase;letter-spacing:0.03em;margin-top:1.4rem">Letzte Tagebuch-Einträge</h4>
+<article>
+    {% for log in recent_logs %}
+    <div style="padding:0.4rem 0;{% if not loop.last %}border-bottom:1px solid var(--pico-muted-border-color,#eee){% endif %}">
+        <small style="color:var(--pico-muted-color)">{{ log.day }}</small>
+        <div style="white-space:pre-wrap">{{ log.content }}</div>
+    </div>
+    {% endfor %}
+    <a href="/daily" style="font-size:0.85rem">Zum Tagescheck →</a>
+</article>
+{% endif %}
+
+{% endblock %}

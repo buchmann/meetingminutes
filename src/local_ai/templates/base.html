@@ -1,76 +1,82 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="de" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}local-ai{% endblock %}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <link rel="stylesheet" href="/static/css/app.css?v=20260621d">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
+    <link rel="stylesheet" href="/static/css/app.css?v=20260622a">
     <script src="/static/vendor/htmx.min.js"></script>
-    <script src="/static/js/app.js?v=20260621d" defer></script>
+    <script src="/static/js/app.js?v=20260622a" defer></script>
 </head>
 <body>
-    <header class="container">
-        <nav>
-            <ul>
-                <li><a href="/search"><strong>local-ai</strong></a></li>
-            </ul>
-            {% if user %}
-            <ul class="nav-menu">
-                <li>
-                    <details class="dropdown">
-                        <summary class="secondary"><small>Meetings</small></summary>
-                        <ul dir="rtl">
-                            <li><a href="/meetings">Meetings</a></li>
-                        </ul>
-                    </details>
-                </li>
-                <li>
-                    <details class="dropdown">
-                        <summary class="secondary"><small>Textfunctions</small></summary>
-                        <ul dir="rtl">
-                            <li><a href="/chat">Text Improver</a></li>
-                            <li><a href="/documents">Document Checker</a></li>
-                            <li><a href="/translate">Translator</a></li>
-                            <li><a href="/consolidate">Consolidator</a></li>
-                        </ul>
-                    </details>
-                </li>
-                <li>
-                    <details class="dropdown">
-                        <summary class="secondary"><small>PA</small></summary>
-                        <ul dir="rtl">
-                            <li><a href="/daily">Daily Check-in</a></li>
-                            <li><a href="/search">Web Search</a></li>
-                            <li><a href="/notes">Notes &amp; Manuals</a></li>
-                            <li><a href="/email">E-Mail</a></li>
-                            {% if user.profile and 'vermieter' in user.profile %}
-                            <li><a href="/immobilien">Immobilien</a></li>
-                            {% endif %}
-                        </ul>
-                    </details>
-                </li>
-                <li><a href="/projects" class="secondary"><small>Projects</small></a></li>
-                <li><a href="/system" class="secondary"><small>System</small></a></li>
-                <li><a href="/settings" class="secondary"><small>Settings</small></a></li>
-                {% if user.is_admin %}
-                <li><a href="/admin/users" class="secondary"><small>Users</small></a></li>
-                {% endif %}
-                <li><small style="opacity:0.7">{{ user.username }}</small></li>
-                <li>
-                    <form method="post" action="/logout" style="margin:0">
-                        <button class="secondary outline" style="margin:0;padding:0.2rem 0.7rem;font-size:0.8rem">Logout</button>
-                    </form>
-                </li>
-            </ul>
+{% if user %}
+{% set path = request.url.path %}
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <a href="/"><strong>local-ai</strong></a>
+            <button class="sidebar-close" onclick="toggleSidebar()" aria-label="Menü schließen"><i class="ti ti-x"></i></button>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/" class="navi {% if path == '/' %}active{% endif %}"><i class="ti ti-home" aria-hidden="true"></i> Start</a>
+            <a href="/daily" class="navi {% if path == '/daily' %}active{% endif %}"><i class="ti ti-heart" aria-hidden="true"></i> Liebling</a>
+            <a href="/projects" class="navi {% if path.startswith('/projects') %}active{% endif %}"><i class="ti ti-folder" aria-hidden="true"></i> Projekte</a>
+            <a href="/meetings" class="navi {% if path == '/meetings' or path.startswith('/jobs') %}active{% endif %}"><i class="ti ti-microphone" aria-hidden="true"></i> Meetings</a>
+
+            <div class="navi-group">Werkzeuge</div>
+            <a href="/chat" class="navi {% if path == '/chat' %}active{% endif %}"><i class="ti ti-pencil" aria-hidden="true"></i> Text verbessern</a>
+            <a href="/documents" class="navi {% if path == '/documents' %}active{% endif %}"><i class="ti ti-file-text" aria-hidden="true"></i> Dokument prüfen</a>
+            <a href="/translate" class="navi {% if path == '/translate' %}active{% endif %}"><i class="ti ti-language" aria-hidden="true"></i> Übersetzen</a>
+            <a href="/consolidate" class="navi {% if path == '/consolidate' %}active{% endif %}"><i class="ti ti-stack-2" aria-hidden="true"></i> Bündeln</a>
+
+            <div class="navi-group">Wissen</div>
+            <a href="/search" class="navi {% if path == '/search' %}active{% endif %}"><i class="ti ti-search" aria-hidden="true"></i> Websuche</a>
+            <a href="/notes" class="navi {% if path == '/notes' %}active{% endif %}"><i class="ti ti-notebook" aria-hidden="true"></i> Notizen</a>
+            <a href="/email" class="navi {% if path == '/email' %}active{% endif %}"><i class="ti ti-mail" aria-hidden="true"></i> E-Mail</a>
+
+            <div class="navi-group">Verwaltung</div>
+            {% if user.profile and 'vermieter' in user.profile %}
+            <a href="/immobilien" class="navi {% if path == '/immobilien' %}active{% endif %}"><i class="ti ti-building" aria-hidden="true"></i> Immobilien</a>
             {% endif %}
+            <span class="navi navi-soon"><i class="ti ti-wallet" aria-hidden="true"></i> Finanzen <span class="soon">bald</span></span>
+            <span class="navi navi-soon"><i class="ti ti-message-circle" aria-hidden="true"></i> Chat <span class="soon">bald</span></span>
         </nav>
-    </header>
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
-    <footer class="container">
-        <small>local-ai v0.1.0 &mdash; All processing runs locally</small>
-    </footer>
+        <div class="sidebar-foot">
+            <a href="/system" class="navi {% if path == '/system' %}active{% endif %}"><i class="ti ti-activity" aria-hidden="true"></i> System</a>
+            <a href="/settings" class="navi {% if path == '/settings' %}active{% endif %}"><i class="ti ti-settings" aria-hidden="true"></i> Einstellungen</a>
+            {% if user.is_admin %}
+            <a href="/admin/users" class="navi {% if path.startswith('/admin') %}active{% endif %}"><i class="ti ti-users" aria-hidden="true"></i> Nutzer</a>
+            {% endif %}
+            <form method="post" action="/logout" class="navi-logout">
+                <span class="navi-user"><i class="ti ti-user" aria-hidden="true"></i> {{ user.username }}</span>
+                <button class="secondary outline" aria-label="Logout" title="Logout"><i class="ti ti-logout" aria-hidden="true"></i></button>
+            </form>
+        </div>
+    </aside>
+
+    <div class="app-main">
+        <div class="topbar">
+            <button class="hamburger" onclick="toggleSidebar()" aria-label="Menü öffnen"><i class="ti ti-menu-2"></i></button>
+            <a href="/" class="topbar-brand"><strong>local-ai</strong></a>
+        </div>
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+        <footer class="app-footer">
+            <small>local-ai v0.1.0 &mdash; läuft lokal in deinem Netz</small>
+        </footer>
+    </div>
+    <div class="sidebar-backdrop" onclick="toggleSidebar()"></div>
+</div>
+<script>
+    function toggleSidebar(){ document.body.classList.toggle('sidebar-open'); }
+</script>
+{% else %}
+<main class="container" style="max-width:480px;padding-top:2rem">
+    {{ self.content() }}
+</main>
+{% endif %}
 </body>
 </html>

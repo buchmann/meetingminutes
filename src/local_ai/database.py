@@ -704,6 +704,14 @@ class Database:
         )
         return [dict(r) for r in await cur.fetchall()]
 
+    async def count_project_docs_in_section(self, user_id: str, section: str) -> int:
+        cur = await self._db.execute(
+            "SELECT COUNT(*) AS n FROM project_docs WHERE user_id = ? AND section = ?",
+            (user_id, section),
+        )
+        row = await cur.fetchone()
+        return int(row["n"]) if row else 0
+
     async def set_project_doc_section(self, doc_id: str, user_id: str, section: str) -> bool:
         cur = await self._db.execute(
             "UPDATE project_docs SET section = ? WHERE id = ? AND user_id = ?",

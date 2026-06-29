@@ -53,3 +53,12 @@ Once `SecretSynced`, the TLS secrets refresh from Vault automatically (refreshIn
 with `vault write -f auth/approle/role/eso/secret-id` and update the k8s secret).
 The Vault CA (self-signed `O=HashiCorp, CN=Vault`) is baked into the ClusterSecretStore
 `caBundle`; if Vault's cert changes, refresh it.
+
+## Note: Vault TLS cert needed SANs (2026-06-29)
+ESO verifies Vault's TLS cert; the original self-signed cert had NO SANs, so login
+failed with `x509: ... doesn't contain any IP SANs`. Fix (one-time, on .97, SIGHUP
+reload — no unseal): reissued `/opt/vault/tls/tls.{crt,key}` self-signed with
+`subjectAltName=IP:192.168.178.97,IP:127.0.0.1,DNS:localhost,DNS:kubeflow,DNS:vault`
+then `systemctl reload vault`. The caBundle in clustersecretstore-vault.yaml is that
+cert; refresh it if Vault's cert changes. STATUS: live — local-ai/bum/gitlab
+ExternalSecrets all SecretSynced.

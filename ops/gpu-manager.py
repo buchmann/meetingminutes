@@ -96,7 +96,7 @@ def _can_coexist(target_service: str) -> bool:
 _SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "gpu-manager")
 _OTEL_ENDPOINT = os.getenv(
     "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-    "http://192.168.178.190:4318/v1/traces",
+    "http://192.168.178.190:4318/v1/traces",  # Spark OTEL collector (HTTP)
 )
 _TRACING_ENABLED = False
 

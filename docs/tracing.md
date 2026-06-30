@@ -135,6 +135,21 @@ Both naming conventions are set because:
 - OTEL ecosystem tools read `gen_ai.*` attributes
 - The OTEL Collector's `transform/genai_to_llm` processor also maps `gen_ai.*` → `llm.*` for vLLM's native spans
 
+#### vLLM server-side spans (both models)
+
+In addition to the app-side `gen_ai.*` spans (OpenAI instrumentor, above), **vLLM
+itself** emits server-side request spans (scheduling, queue + inference timing) via
+its `--otlp-traces-endpoint`. Both serving containers send these to the Spark OTEL
+collector on **:4318** (`http/protobuf`):
+
+| Model | Container | Image | Note |
+|-------|-----------|-------|------|
+| gpt-oss-120b (:8000, default) | `vllm-gpt-oss-cutlass` | `vllm-node-mxfp4:otel` | base CUTLASS build lacks an OTLP exporter → `:otel` tag adds `opentelemetry-exporter-otlp-proto-http`; run with `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf` |
+| Granite 4.0-H-Small (:8001) | `vllm-granite-small` | `vllm/vllm-openai:latest` | stock image already bundles the exporter |
+
+vLLM picks the exporter from `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` (`grpc` default → :4317,
+or `http/protobuf` → :4318/v1/traces). See `ops/README.md` for the exact run commands.
+
 ### 4. LLM Metrics Recording
 
 After each LLM call, metrics are recorded via the `LLMMetrics` wrapper:

@@ -66,8 +66,10 @@ docker run -d --name vllm-granite-small --restart unless-stopped \
   --served-model-name ibm/granite-3-3-8b-instruct \
   --port 8001 --gpu-memory-utilization 0.72 --max-model-len 32768 \
   --dtype bfloat16 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 8 \
-  --otlp-traces-endpoint http://192.168.178.190:4328/v1/traces
+  --otlp-traces-endpoint http://192.168.178.190:4318/v1/traces
 ```
+> Stock `vllm/vllm-openai` already bundles the OTLP exporter, so Granite needs no
+> `:otel` rebuild. Endpoint = Spark OTEL collector on **:4318** (gRPC alt: :4317).
 
 ### gpt-oss-120b (port 8000, default model, MXFP4/CUTLASS)
 Requires the custom **`vllm-node-mxfp4`** image — build it from
@@ -83,15 +85,32 @@ docker run -d --name vllm-gpt-oss-cutlass --restart no \
   --runtime nvidia --gpus all --network host --ipc host \
   -v /home/manfred/.cache/huggingface:/root/.cache/huggingface \
   -e VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1 \
-  vllm-node-mxfp4 bash -c -i "vllm serve openai/gpt-oss-120b \
-    --served-model-name gpt-oss-120b --host 0.0.0.0 --port 8000 \
+  -e OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf \
+  -e OTEL_SERVICE_NAME=vllm-gpt-oss-120b \
+  vllm-node-mxfp4:otel bash -c -i "vllm serve openai/gpt-oss-120b \
+    --served-model-name gpt-oss-120b openai/gpt-oss-120b --host 0.0.0.0 --port 8000 \
     --enable-auto-tool-choice --tool-call-parser openai --reasoning-parser openai_gptoss \
     --gpu-memory-utilization 0.70 --enable-prefix-caching \
     --load-format fastsafetensors --quantization mxfp4 \
     --mxfp4-backend CUTLASS --mxfp4-layers moe,qkv,o,lm_head \
     --attention-backend FLASHINFER --kv-cache-dtype fp8 \
-    --max-num-batched-tokens 8192 --max-model-len 32768"
+    --max-num-batched-tokens 8192 --max-model-len 32768 \
+    --otlp-traces-endpoint http://192.168.178.190:4318/v1/traces"
 ```
+
+> **Server-side OTLP tracing (`vllm-node-mxfp4:otel`):** the base `vllm-node-mxfp4`
+> build ships `opentelemetry-{api,sdk}` but **not** an OTLP span exporter, so vLLM
+> would crash on startup with `--otlp-traces-endpoint`. The `:otel` tag is that image
+> plus the exporter — created once with:
+> ```bash
+> docker exec vllm-gpt-oss-cutlass pip install --no-cache-dir opentelemetry-exporter-otlp-proto-http==1.42.1
+> docker commit vllm-gpt-oss-cutlass vllm-node-mxfp4:otel
+> ```
+> vLLM's tracer picks the exporter from `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`
+> (`grpc` default → port 4317, or `http/protobuf` → port 4318/v1/traces). We use
+> **http/protobuf → the Spark OTEL collector on :4318** (same path the app uses).
+> `--served-model-name gpt-oss-120b openai/gpt-oss-120b` exposes both names (the second
+> is the alias Instana queries). `OTEL_SERVICE_NAME` is how the spans show up in Instana.
 
 ### bge-m3 embeddings (port 8002)
 ```bash

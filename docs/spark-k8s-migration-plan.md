@@ -69,11 +69,18 @@ large model(s) to 0. Two options:
 
 ## Phased rollout (each phase reversible)
 
-**Phase 1 — Cluster prep** *(no disruption)*
-- Namespace `spark-ai`; label node; create `nvidia` RuntimeClass if missing.
-- Device-plugin **time-slicing** ConfigMap (replicas: 4) + restart plugin.
-- `hostPath` volume manifest for the HF cache; ConfigMaps for collector config; Secrets.
-- Build/import the `vllm-node-mxfp4:otel` image into k3s containerd.
+**Phase 1 — Cluster prep** *(no disruption)* — ✅ **DONE 2026-07-01**
+- ✅ Namespace `spark-ai` created; `nvidia` RuntimeClass confirmed present (k3s auto).
+- ✅ Device-plugin **time-slicing** ConfigMap (`replicas: 4`) applied + plugin rolled
+  out → node `nvidia.com/gpu` capacity/allocatable = **4**. Proven with 2 concurrent
+  GPU pods (both saw the GB10). Live vLLM `:8000` stayed HTTP 200 throughout.
+- ✅ Reproducible `vllm-node-mxfp4:otel` image **built** from a Dockerfile
+  (`/home/manfred/vllm-otel/Dockerfile` = base + `opentelemetry-exporter-otlp-proto-http`),
+  replacing the `docker commit` hack. Manifests: `/home/manfred/phase1-gpu.yaml`.
+- ⏭️ Deferred to Phase 2 (need it only at cutover): import the image into k3s
+  containerd (`k3s ctr images import`, needs root); `hostPath` HF-cache volume in the
+  pod specs; collector ConfigMaps/Secrets.
+- Kubeconfig for the `manfred` user at `~/.kube/config` (copied once via sudo).
 
 **Phase 2 — Serving cutover** *(brief per-service downtime)*
 For each of gptoss / granite / embed / whisper: write the Deployment (hostNetwork,

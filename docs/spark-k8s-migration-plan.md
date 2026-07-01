@@ -99,18 +99,32 @@ large model(s) to 0. Two options:
   k8s-aware, because the gpt-oss↔granite **switch would load both large models = OOM**.
   ⚠️ **Until Phase 4: do not switch the active model to granite.**
 
-**Phase 3 — Monitoring on k8s** *(cleaner + fixes restart bug)*
-- **Instana agent DaemonSet** via Helm (auto-restart, native k8s + host + container
-  monitoring) → retires the `restart=no` docker agent that died silently for 3 weeks.
-- **NVIDIA GPU Operator** (with `driver.enabled=false`, `toolkit.enabled=false` — host has
-  both) for the standard DCGM exporter → `oTelDcgm`.
-- **OTel collector** Deployment with our existing pipelines (traces, metrics/app,
-  metrics/gpu, metrics/vllm incl. the `resource/vllm` INSTANA_PLUGIN=vllm tagging).
+**Phase 3 — Monitoring on k8s** — ✅ **DONE 2026-07-01**
+- ✅ **Instana Agent for Kubernetes** via Helm (ns `instana-agent`): host-agent
+  DaemonSet + 3 k8sensor pods, cluster `spark-k3s`, zone `ngx-spark`, OTLP grpc+http.
+  Retires the docker agent. **Gotcha:** OTLP acceptor binds `127.0.0.1:4317/4318` only
+  → all hostNetwork pods target `127.0.0.1`; ports must be free at agent start.
+- ✅ **dcgm-exporter** → DaemonSet (`securityContext SYS_ADMIN`, CSV hostPath File,
+  no subPath). Kept the existing DCGM pipeline (dashboard-compatible).
+- ✅ **OTel collector** → Deployment (`otelcol-config` cm): prometheus dcgm+vllm +
+  `resource/vllm` (INSTANA_PLUGIN=vllm) → otlphttp `127.0.0.1:4318` (agent). Docker
+  collector + docker agent stopped.
 
-**Phase 4 — Cutover finish**
-- Rewrite + deploy `gpu-manager` (scaling controller, RBAC).
-- Decommission the Docker containers; k3s already `systemd`-enabled on boot.
-- Update `ops/` manifests + `docs/monitoring.md`.
+**Phase 4 — Cutover finish** — ✅ **DONE 2026-07-01**
+- ✅ Rewrote `gpu-manager` k8s-native (`ops/gpu_manager_k8s.py`): scales Deployments
+  (whisperx→whisper, large→vllm-gptoss, small→vllm-granite) via the k8s API +
+  ServiceAccount/Role (deployments/scale), same `:9090` contract, hostNetwork.
+  Image `gpu-manager:k8s`. Verified: `/status` + `/gpu/whisperx` scale the k8s whisper
+  (coexists with gpt-oss), then back to 0.
+- ✅ All migrated docker containers set `restart=no` (kept stopped for rollback; won't
+  conflict on reboot). Only unrelated `mcp-proxy` remains on docker. k3s systemd-enabled.
+- Manifests on the Spark: `/home/manfred/phase{1,2,3,4}-*.yaml`; kubeconfig
+  `~/.kube/config`; over SSH always `KUBECONFIG=/home/manfred/.kube/config`.
+
+**Final state:** ns `spark-ai` = vllm-gptoss 1/1, vllm-embed 1/1, vllm-granite 0
+(switch), whisper 0 (on-demand), otel-collector 1/1, gpu-manager 1/1, dcgm-exporter
+DaemonSet 1/1. Endpoints :8000/:8002/:9090/:9400 all 200. **Not yet verified in the
+Instana UI** (no MCP/browser) — user should confirm entities under cluster `spark-k3s`.
 
 ## Risks / gotchas
 - **Time-slicing is mandatory** or concurrent embed+LLM breaks (exclusive GPU).

@@ -123,8 +123,13 @@ Doc: install OTel Data Collector → view under **Infrastructure › Analyze
 Infrastructure › OTEL Dcgm**. Metrics: `DCGM_FI_DEV_GPU_TEMP`, `POWER_USAGE`,
 `GPU_UTIL`, `MEM_COPY_UTIL`, `FB_USED/FB_FREE`, `SM_CLOCK`, `MEM_CLOCK`.
 
-**local-ai status:** ✅ `prometheus/dcgm` scrape → `oTelDcgm` entity, 10 panels
-live. Note GB10 does **not** emit `FB_USED/FB_FREE` (unified LPDDR5X) or `PROF_*`.
+**local-ai status:** `prometheus/dcgm` scrape via the k8s collector. **Gotcha (like
+vLLM Layer 3):** DCGM metrics only map to the **`OTEL Dcgm`** entity when the GPU
+pipeline stamps resource attrs **`INSTANA_PLUGIN=dcgm`** + **`service.name=nvidia-dcgm`**
+(`resource/dcgm` processor); without them they show as plain host custom gauges, not a
+GPU entity. Note GB10 does **not** emit `FB_USED/FB_FREE` (unified LPDDR5X) or `PROF_*`,
+and the Instana agent's *native* GPU sensor does not support GB10 — so DCGM-exporter +
+this tagging is the correct path.
 
 ---
 

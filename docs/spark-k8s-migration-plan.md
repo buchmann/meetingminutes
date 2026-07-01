@@ -82,12 +82,22 @@ large model(s) to 0. Two options:
   pod specs; collector ConfigMaps/Secrets.
 - Kubeconfig for the `manfred` user at `~/.kube/config` (copied once via sudo).
 
-**Phase 2 — Serving cutover** *(brief per-service downtime)*
-For each of gptoss / granite / embed / whisper: write the Deployment (hostNetwork,
-runtimeClassName nvidia, `nvidia.com/gpu:1`, hostPath cache, env + serve flags copied
-1:1 from `ops/README.md`), then **stop the Docker container and apply the Deployment**.
-Verify `:8000/health` etc. after each. Set `--restart no` semantics via k8s (no auto-run
-of the heavy model unless scaled).
+**Phase 2 — Serving cutover** *(brief per-service downtime)* — 🟡 **gpt-oss DONE 2026-07-01**
+- ✅ **gpt-oss** (`Deployment/vllm-gptoss` in `spark-ai`): hostNetwork, hostIPC,
+  runtimeClassName nvidia, `nvidia.com/gpu:1`, hostPath HF cache, serve flags 1:1 +
+  `--otlp-traces-endpoint …:4318`, startup/liveness probes on `/health`. Image imported
+  into k3s containerd. Cutover: stopped docker `vllm-gpt-oss-cutlass` → scaled to 1 →
+  healthy ~240s → completion verified. **Bonus:** k8s auto-restarts the pod on
+  reboot/crash (fixes the old docker `restart=no`). Docker container kept **stopped** for
+  rollback (`scale deploy 0` + `docker start vllm-gpt-oss-cutlass`).
+- **whisper**: intentionally **kept as on-demand Docker** (user decision — transcription
+  is async/on-demand). Verified it **coexists** with the gpt-oss pod (both healthy, no OOM),
+  so the transcribe→summarize path works across the docker/k8s boundary.
+- **embed**: left as Docker for now (small, always-on, coexists; migrating adds RAG
+  downtime for little gain). Migrate later with an image import if desired.
+- **granite**: ⏸️ **not migrated** — staging it is pointless until the gpu-manager is
+  k8s-aware, because the gpt-oss↔granite **switch would load both large models = OOM**.
+  ⚠️ **Until Phase 4: do not switch the active model to granite.**
 
 **Phase 3 — Monitoring on k8s** *(cleaner + fixes restart bug)*
 - **Instana agent DaemonSet** via Helm (auto-restart, native k8s + host + container
